@@ -1,0 +1,13 @@
+providers:
+  - name: claude
+    protocol: anthropic
+    model: claude-sonnet-4-6
+    api_key: sk-ant-xxx
+    thinking: true         # extended thinking (anthropic only)
+    # base_url: https://api.deepseek.com/anthropic  # custom endpoint
+
+  # - name: gpt
+  #   protocol: openai
+  #   model: gpt-4o
+  #   api_key: sk-xxx
+  #   base_url: https://api.openai.com/v1

@@ -1,0 +1,5 @@
+.mewcode/config.yaml
+__pycache__/
+*.pyc
+mewcode.egg-info/
+.pytest_cache/
