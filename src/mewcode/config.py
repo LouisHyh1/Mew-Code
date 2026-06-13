@@ -37,7 +37,7 @@ def load(path: str) -> Config:
         raise ConfigError(f"YAML parse error in {path}: {e}") from e
 
     if raw is None or "providers" not in raw:
-        raise ConfigError(f"Config must contain a 'providers' key with at least one entry")
+        raise ConfigError("Config must contain a 'providers' key with at least one entry")
 
     providers_raw = raw["providers"]
     if not isinstance(providers_raw, list) or len(providers_raw) == 0:
@@ -62,9 +62,9 @@ def load(path: str) -> Config:
 
 
 def _validate_provider(entry: dict, prefix: str) -> None:
-    for field in ("name", "protocol", "api_key", "model"):
-        if field not in entry or entry[field] is None:
-            raise ConfigError(f"{prefix}.{field} cannot be empty")
+    for fld in ("name", "protocol", "api_key", "model"):
+        if fld not in entry or entry[fld] is None:
+            raise ConfigError(f"{prefix}.{fld} cannot be empty")
     if entry["protocol"] not in ("anthropic", "openai"):
         raise ConfigError(
             f"{prefix}.protocol must be 'anthropic' or 'openai', got '{entry['protocol']}'"

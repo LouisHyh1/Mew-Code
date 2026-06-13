@@ -1,9 +1,19 @@
-"""Anthropic Messages API adapter with streaming."""
+"""Anthropic Messages API adapter with streaming and tool use."""
 
 import asyncio
+import json
+from collections.abc import AsyncIterator
 
 from mewcode.config import ProviderConfig
-from mewcode.llm import Message, StreamEvent
+from mewcode.llm import (
+    ROLE_ASSISTANT,
+    ROLE_TOOL,
+    ROLE_USER,
+    Message,
+    StreamEvent,
+    ToolCall,
+    ToolDefinition,
+)
 from mewcode.prompt import SYSTEM_PROMPT
 
 
@@ -27,17 +37,20 @@ class AnthropicProvider:
     def model(self) -> str:
         return self._model
 
-    async def stream(self, msgs: list[Message]) -> "AsyncIterator[StreamEvent]":
-        from anthropic import AsyncAnthropic
+    async def stream(
+        self, msgs: list[Message], tools: list[ToolDefinition]
+    ) -> "AsyncIterator[StreamEvent]":
 
-        messages = [{"role": m.role, "content": m.content} for m in msgs]
+        messages = self._to_anthropic_messages(msgs)
         params: dict = {
             "model": self._model,
             "max_tokens": 4096,
             "system": SYSTEM_PROMPT,
             "messages": messages,
         }
-        if self._thinking:
+        if tools:
+            params["tools"] = self._to_anthropic_tools(tools)
+        if self._thinking and not self._has_tool_history(msgs):
             params["thinking"] = {"type": "enabled", "budget_tokens": 2048}
 
         try:
@@ -46,9 +59,69 @@ class AnthropicProvider:
                     if event.type == "content_block_delta":
                         if getattr(event.delta, "type", None) == "text_delta":
                             yield StreamEvent(text=event.delta.text)
-                    # thinking_delta events are received but discarded
-            yield StreamEvent(done=True)
+
+                final_message = await stream.get_final_message()
+                if final_message.stop_reason == "tool_use":
+                    calls = []
+                    for block in final_message.content:
+                        if block.type == "tool_use":
+                            calls.append(ToolCall(
+                                id=block.id,
+                                name=block.name,
+                                input=json.dumps(block.input),
+                            ))
+                    if calls:
+                        yield StreamEvent(tool_calls=calls)
+                yield StreamEvent(done=True)
         except asyncio.CancelledError:
             raise
         except Exception as e:
             yield StreamEvent(err=e)
+
+    def _to_anthropic_tools(self, tools: list[ToolDefinition]) -> list[dict]:
+        return [
+            {
+                "name": t.name,
+                "description": t.description,
+                "input_schema": t.input_schema,
+            }
+            for t in tools
+        ]
+
+    def _has_tool_history(self, msgs: list[Message]) -> bool:
+        for m in msgs:
+            if m.tool_calls or m.tool_results:
+                return True
+        return False
+
+    def _to_anthropic_messages(self, msgs: list[Message]) -> list[dict]:
+        result = []
+        for m in msgs:
+            if m.role == ROLE_USER:
+                result.append({"role": "user", "content": m.content})
+            elif m.role == ROLE_ASSISTANT:
+                if m.tool_calls:
+                    content: list[dict] = [
+                        {"type": "text", "text": m.content}
+                    ]
+                    for c in m.tool_calls:
+                        content.append({
+                            "type": "tool_use",
+                            "id": c.id,
+                            "name": c.name,
+                            "input": json.loads(c.input),
+                        })
+                    result.append({"role": "assistant", "content": content})
+                else:
+                    result.append({"role": "assistant", "content": m.content})
+            elif m.role == ROLE_TOOL:
+                content = []
+                for r in m.tool_results:
+                    content.append({
+                        "type": "tool_result",
+                        "tool_use_id": r.tool_call_id,
+                        "content": r.content,
+                        "is_error": r.is_error,
+                    })
+                result.append({"role": "user", "content": content})
+        return result

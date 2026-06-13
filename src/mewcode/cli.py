@@ -3,12 +3,11 @@
 import os
 import sys
 
-from mewcode.config import ConfigError, load
+from mewcode import __version__
 
 
 def main() -> None:
     if "--version" in sys.argv:
-        from mewcode import __version__
         print(__version__)
         return
 
@@ -22,6 +21,8 @@ def main() -> None:
     err = None
     for path in config_paths:
         try:
+            from mewcode.config import ConfigError, load
+
             cfg = load(path)
             break
         except (ConfigError, FileNotFoundError) as e:
@@ -36,9 +37,11 @@ def main() -> None:
             print(f"No config file found. Searched:\n  - {searched}", file=sys.stderr)
         sys.exit(1)
 
+    from mewcode.tool import new_default_registry
     from mewcode.tui.app import MewCodeApp
 
-    app = MewCodeApp(cfg.providers)
+    registry = new_default_registry()
+    app = MewCodeApp(cfg.providers, registry, __version__)
     app.run()
 
 

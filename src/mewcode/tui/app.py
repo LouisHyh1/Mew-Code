@@ -1,7 +1,8 @@
-"""Textual TUI application — MewCodeApp with state machine."""
+"""Textual TUI application — MewCodeApp with state machine and tool support."""
 
 import asyncio
 import time
+from dataclasses import dataclass
 from enum import Enum
 
 from rich.markdown import Markdown
@@ -13,11 +14,20 @@ from textual.message import Message as TMessage
 from textual.widgets import OptionList, RichLog, Static, TextArea
 
 from mewcode import __version__
+from mewcode.agent import Agent, Phase
 from mewcode.config import ProviderConfig
 from mewcode.conversation import Conversation
-from mewcode.llm import StreamEvent, new_provider
 from mewcode.llm import Provider as LLMProvider
+from mewcode.llm import new_provider
 from mewcode.prompt import render_banner
+from mewcode.tool import Registry
+from mewcode.tui.view import tool_line, tool_result_summary
+
+
+@dataclass
+class ToolDisplay:
+    name: str
+    args: str
 
 
 class SessionState(Enum):
@@ -102,15 +112,23 @@ class MewCodeApp(App):
         Binding("ctrl+c", "quit", "Quit"),
     ]
 
-    def __init__(self, providers: list[ProviderConfig]) -> None:
+    def __init__(
+        self,
+        providers: list[ProviderConfig],
+        registry: Registry,
+        version: str | None = None,
+    ) -> None:
         super().__init__()
+        self._version = version or __version__
         self.providers = providers
         self.provider: LLMProvider | None = None
         self.conv = Conversation()
+        self._tool_registry = registry
         self.state = SessionState.SELECTING if len(providers) > 1 else SessionState.IDLE
         self.cur_reply = ""
         self.turn_start = 0.0
         self._stream_task: asyncio.Task[None] | None = None
+        self._cur_tool: ToolDisplay | None = None
 
     def compose(self) -> ComposeResult:
         yield RichLog(id="dialog", wrap=True, markup=True, highlight=True)
@@ -119,7 +137,7 @@ class MewCodeApp(App):
         yield Static("", id="statusbar")
 
     def on_mount(self) -> None:
-        banner = render_banner(__version__)
+        banner = render_banner(self._version)
         log = self.query_one("#dialog", RichLog)
         log.write(banner)
 
@@ -179,23 +197,45 @@ class MewCodeApp(App):
 
         self.cur_reply = ""
         self.turn_start = time.monotonic()
-        self._stream_task = asyncio.create_task(self._consume_stream())
+        self._stream_task = asyncio.create_task(self._consume_agent_events())
 
-    # ── consume stream ─────────────────────────────────────────
+    # ── consume agent events ───────────────────────────────────
 
-    async def _consume_stream(self) -> None:
+    async def _consume_agent_events(self) -> None:
         assert self.provider is not None
         streaming = self.query_one("#timer", Static)
 
         try:
-            async for ev in self.provider.stream(self.conv.messages()):
+            agent = Agent(self.provider, self._tool_registry)
+            async for ev in agent.run(self.conv):
                 if ev.err is not None:
                     self._finish_with_error(ev.err)
                     return
                 if ev.text:
                     self.cur_reply += ev.text
                     elapsed = time.monotonic() - self.turn_start
-                    streaming.update(f"● MewCode  Imagining… ({elapsed:.0f}s)")
+                    if self._cur_tool is not None:
+                        streaming.update(
+                            f"● {self._cur_tool.name}({self._cur_tool.args}) "
+                            f"Running… ({elapsed:.0f}s)"
+                        )
+                    else:
+                        streaming.update(f"● MewCode  Imagining… ({elapsed:.0f}s)")
+                if ev.tool is not None and ev.tool.phase == Phase.START:
+                    # 先提交 preamble 到 scrollback，然后开始工具行
+                    if self.cur_reply.strip():
+                        log = self.query_one("#dialog", RichLog)
+                        log.write(Markdown(self.cur_reply))
+                        self.cur_reply = ""
+                    self._cur_tool = ToolDisplay(
+                        name=ev.tool.name, args=ev.tool.args
+                    )
+                if ev.tool is not None and ev.tool.phase == Phase.END:
+                    log = self.query_one("#dialog", RichLog)
+                    args_display = self._cur_tool.args if self._cur_tool else ev.tool.args
+                    log.write(tool_line(ev.tool.name, args_display))
+                    log.write(tool_result_summary(ev.tool.result, ev.tool.is_error))
+                    self._cur_tool = None
                 if ev.done:
                     self._finish_with_assistant(self.cur_reply)
                     return
@@ -209,14 +249,16 @@ class MewCodeApp(App):
         log = self.query_one("#dialog", RichLog)
         streaming = self.query_one("#timer", Static)
 
-        md = Markdown(reply)
-        log.write(md)
+        if reply.strip():
+            md = Markdown(reply)
+            log.write(md)
         log.write(Text(f"  ({elapsed:.1f}s)", style="dim"))
 
         self.conv.add_assistant(reply)
         streaming.update("")
         self._stream_task = None
         self.state = SessionState.IDLE
+        self._cur_tool = None
         self.query_one("#input", InputArea).focus()
 
     def _finish_with_error(self, err: Exception) -> None:
@@ -227,6 +269,7 @@ class MewCodeApp(App):
         streaming.update("")
         self._stream_task = None
         self.state = SessionState.IDLE
+        self._cur_tool = None
         self.query_one("#input", InputArea).focus()
 
     # ── quit ───────────────────────────────────────────────────
