@@ -4,7 +4,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
 
-from mewcode.config import ProviderConfig
+from novacode.config import ProviderConfig
 
 ROLE_USER = "user"
 ROLE_ASSISTANT = "assistant"
@@ -66,9 +66,9 @@ class Provider(Protocol):
 
 def new_provider(cfg: ProviderConfig) -> "Provider":
     if cfg.protocol == "anthropic":
-        from mewcode.llm.anthropic_provider import AnthropicProvider
+        from novacode.llm.anthropic_provider import AnthropicProvider
         return AnthropicProvider(cfg)
     if cfg.protocol == "openai":
-        from mewcode.llm.openai_provider import OpenAIProvider
+        from novacode.llm.openai_provider import OpenAIProvider
         return OpenAIProvider(cfg)
     raise ValueError(f"Unknown protocol: {cfg.protocol}")

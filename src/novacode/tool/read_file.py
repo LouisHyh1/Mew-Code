@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 
-from mewcode.tool import Result, _truncate
+from novacode.tool import Result, _truncate
 
 
 class ReadFileTool:

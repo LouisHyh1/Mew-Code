@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from mewcode.config import ConfigError, load
+from novacode.config import ConfigError, load
 
 
 def test_single_provider(tmp_path: Path) -> None:

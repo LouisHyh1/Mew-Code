@@ -1,7 +1,7 @@
 """Tests for conversation module."""
 
-from mewcode.conversation import Conversation
-from mewcode.llm import ROLE_ASSISTANT, ROLE_TOOL, ROLE_USER, ToolCall, ToolResult
+from novacode.conversation import Conversation
+from novacode.llm import ROLE_ASSISTANT, ROLE_TOOL, ROLE_USER, ToolCall, ToolResult
 
 
 def test_add_and_retrieve() -> None:

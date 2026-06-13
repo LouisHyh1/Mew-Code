@@ -10,13 +10,13 @@
   async 流式（SDK 内部已处理 SSE）
 
 ## 架构概览（分层）
-1. 入口层 `mewcode.cli` —— 加载配置、打印 banner、启动 Textual App。
-2. 配置层 `mewcode.config` —— 读取并校验 `.mewcode/config.yaml`，给出 providers 列表。
-3. LLM 协议层 `mewcode.llm` —— 定义协议无关的 `Provider` Protocol 与统一消息/流式事件类型；
+1. 入口层 `novacode.cli` —— 加载配置、打印 banner、启动 Textual App。
+2. 配置层 `novacode.config` —— 读取并校验 `.novacode/config.yaml`，给出 providers 列表。
+3. LLM 协议层 `novacode.llm` —— 定义协议无关的 `Provider` Protocol 与统一消息/流式事件类型；
    anthropic、openai 两个适配器各自封装官方 SDK、统一吐出文本增量（思考增量内部丢弃）。
-4. 会话层 `mewcode.conversation` —— 进程内维护多轮历史，提供完整上下文。
-5. 提示词/资源 `mewcode.prompt` —— 内置 system prompt 与启动 banner（ASCII 猫）。
-6. 终端层 `mewcode.tui` —— Textual App，含状态机（选择/空闲/流式）、输入框、对话区、
+4. 会话层 `novacode.conversation` —— 进程内维护多轮历史，提供完整上下文。
+5. 提示词/资源 `novacode.prompt` —— 内置 system prompt 与启动 banner（ASCII 猫）。
+6. 终端层 `novacode.tui` —— Textual App，含状态机（选择/空闲/流式）、输入框、对话区、
    loading 计时、provider 选择列表；以 async task 消费 `Provider.stream(...)` 的事件生成器，
    通过 `call_from_thread`/直接 await 把增量写入 UI。
 
@@ -98,7 +98,7 @@ class SessionState(Enum):
     IDLE = "idle"                      # 等待用户输入
     STREAMING = "streaming"            # 等待/接收模型流（loading + 计时）
 
-class MewCodeApp(App):
+class NovaCodeApp(App):
     # 关键 reactive / 成员
     state: SessionState
     providers: list[ProviderConfig]
@@ -117,15 +117,15 @@ class MewCodeApp(App):
 
 ## 模块设计
 
-### 模块 `mewcode.config`
-职责：读取并校验 `.mewcode/config.yaml`，产出 providers 列表。
+### 模块 `novacode.config`
+职责：读取并校验 `.novacode/config.yaml`，产出 providers 列表。
 对外接口：`load(path) -> Config`；`Config.providers`。
 校验规则：列表非空；每项 `name` / `protocol` / `api_key` / `model` 非空；
          `protocol ∈ {"anthropic", "openai"}`。任一不满足 → 抛出 `ConfigError` 携带可读信息
          （指明哪个 provider 的哪个字段）。
 依赖：`pyyaml`、标准库 `pathlib` / `os`。
 
-### 模块 `mewcode.llm`
+### 模块 `novacode.llm`
 职责：定义协议无关的 `Provider` Protocol 与统一消息/事件类型；按 protocol 构造适配器。
 对外接口：`Provider`（typing.Protocol）、`Message`、`StreamEvent`、`new_provider(cfg) -> Provider`。
 子单元：
@@ -146,19 +146,19 @@ class MewCodeApp(App):
        SDK 流由 `async with` 上下文自动清理。
     依赖：`anthropic`、`openai`、本模块 `prompt`、`config`。
 
-### 模块 `mewcode.conversation`
+### 模块 `novacode.conversation`
 职责：进程内维护单会话多轮历史（user/assistant 交替）。
 对外接口：`add_user`、`add_assistant`、`messages()`。
 依赖：`llm`（`Message` 类型）。
 
-### 模块 `mewcode.prompt`
+### 模块 `novacode.prompt`
 职责：提供内置 system prompt 与 ASCII 猫 banner 文本。
 对外接口：`SYSTEM_PROMPT` 常量、`CAT_BANNER` 常量、`render_banner(version, cwd) -> str`。
 依赖：无。
 
-### 模块 `mewcode.tui`
+### 模块 `novacode.tui`
 职责：Textual App，承载选择/对话/流式/错误的全部交互与渲染。
-对外接口：`MewCodeApp(providers: list[ProviderConfig])`；`App.run()` 或 `await App.run_async()`。
+对外接口：`NovaCodeApp(providers: list[ProviderConfig])`；`App.run()` 或 `await App.run_async()`。
 内部职责：
   - 启动时若 `len(providers) > 1` → `SessionState.SELECTING`（`OptionList` 选择）；
     否则直接进 `SessionState.IDLE` 并 `new_provider(providers[0])`。
@@ -178,9 +178,9 @@ class MewCodeApp(App):
     与最大宽度（N6）。
     依赖：`textual`、`rich`、本项目 `llm`、`conversation`、`config`、`prompt`。
 
-### 模块 `mewcode.cli`（入口）
+### 模块 `novacode.cli`（入口）
 职责：装配与启动。
-流程：`config.load(...)` → `prompt.render_banner(version, cwd)` 打印 → `MewCodeApp(cfg.providers).run()`。
+流程：`config.load(...)` → `prompt.render_banner(version, cwd)` 打印 → `NovaCodeApp(cfg.providers).run()`。
 失败处理：配置错误打印可读信息并 `sys.exit(1)`（N4）。
 依赖：`config`、`tui`、`prompt`。
 
@@ -188,10 +188,10 @@ class MewCodeApp(App):
 
 ### 调用链（启动）
 ```
-main() → config.load(".mewcode/config.yaml")
+main() → config.load(".novacode/config.yaml")
        → 若 ConfigError：打印可读错误、sys.exit(1)
        → print(prompt.render_banner(version, cwd))
-       → MewCodeApp(cfg.providers).run()
+       → NovaCodeApp(cfg.providers).run()
          → len(providers) == 1：内部 new_provider(cfg[0]) 构造 provider，进 IDLE
          → len(providers)  > 1：进 SELECTING
 ```
@@ -239,7 +239,7 @@ config.yaml ──load──> list[ProviderConfig] ──new_provider──> Pro
 用户输入 ──> conversation(+user) ──messages()──> Provider.stream
 Provider.stream ──async generator──> StreamEvent (text / done / err)
                                          │
-                                         └──async for──> MewCodeApp._consume_stream
+                                         └──async for──> NovaCodeApp._consume_stream
                                                             │
                                                             ├── text  → 动态区追加
                                                             └── done  → rich.Markdown 渲染
@@ -249,15 +249,15 @@ Provider.stream ──async generator──> StreamEvent (text / done / err)
 
 ## 文件组织
 ```
-mewcode/
+novacode/
 ├── pyproject.toml                  — PEP 621 项目元数据、依赖、脚本入口
 ├── README.md
-├── .mewcode/
+├── .novacode/
 │   └── config.yaml                 — 运行配置（providers 列表）；附 config.yaml.example
 ├── src/
-│   └── mewcode/
+│   └── novacode/
 │       ├── __init__.py
-│       ├── __main__.py             — 允许 `python -m mewcode`
+│       ├── __main__.py             — 允许 `python -m novacode`
 │       ├── cli.py                  — 入口：加载配置、打印 banner、启动 TUI
 │       ├── config.py               — Config / ProviderConfig 类型、load 与校验
 │       ├── prompt.py               — SYSTEM_PROMPT、CAT_BANNER、render_banner
@@ -268,7 +268,7 @@ mewcode/
 │       │   └── openai_provider.py     — openai 适配器（封装 AsyncOpenAI）
 │       └── tui/
 │           ├── __init__.py
-│           ├── app.py              — MewCodeApp、状态机、Run
+│           ├── app.py              — NovaCodeApp、状态机、Run
 │           ├── stream.py           — _consume_stream、_tick 计时
 │           ├── select.py           — provider 选择（OptionList）
 │           └── view.py             — 各状态的渲染拼装、状态栏、错误样式、markdown 定型
@@ -281,15 +281,15 @@ mewcode/
   以 `dependencies = [...]` 声明，锁文件用 `uv.lock`（推荐 `uv`）或 `pip-compile` 生成的
   `requirements.txt`。
 - `tui/` 拆 4 个文件按职责切分；若实现时过碎可合并，不影响接口。
-- `.mewcode/config.yaml` 含真实密钥，应在 `.gitignore` 忽略；提交一份 `config.yaml.example`。
-- `pyproject.toml` 里通过 `[project.scripts] mewcode = "mewcode.cli:main"` 暴露 CLI 入口；
-  装好后既可 `mewcode` 也可 `python -m mewcode`。
+- `.novacode/config.yaml` 含真实密钥，应在 `.gitignore` 忽略；提交一份 `config.yaml.example`。
+- `pyproject.toml` 里通过 `[project.scripts] novacode = "novacode.cli:main"` 暴露 CLI 入口；
+  装好后既可 `novacode` 也可 `python -m novacode`。
 
 ## 技术决策
 
 | 决策点        | 选择                                                         | 理由                                                         |
 | ------------- | ------------------------------------------------------------ | ------------------------------------------------------------ |
-| 语言          | Python 3.12+                                                 | 项目既定（mewcode python 线）；3.12 的 typing/`asyncio.TaskGroup` 等更舒服 |
+| 语言          | Python 3.12+                                                 | 项目既定（novacode python 线）；3.12 的 typing/`asyncio.TaskGroup` 等更舒服 |
 | TUI 框架      | Textual                                                      | async-first，原生跑在 asyncio 上；CSS 样式、widget 丰富；与流式 SDK 天然契合 |
 | markdown 渲染 | Rich 的 `rich.markdown.Markdown`                             | Textual 内部即用 Rich；代码块语法高亮、列表、强调齐全；宽度自适应（N6） |
 | LLM 通信      | 官方 Python SDK（`anthropic` / `openai`）                    | 用户选定；SDK 内置 SSE 解析与 async 流，省去手写；`AsyncAnthropic` / `AsyncOpenAI` 即可 |
@@ -302,6 +302,6 @@ mewcode/
 | provider 选择 | 单份直进 / 多份 `OptionList` 选择                            | 满足 F2                                                      |
 | 历史          | 进程内 `list[Message]`，单会话                               | 满足 F6；不持久化                                            |
 | system prompt | 内置常量，适配器注入                                         | 满足 F4；conversation 保持纯 user/assistant                  |
-| 配置          | `.mewcode/config.yaml` + `pyyaml`；密钥入 `.gitignore`       | 用户既定路径；N5 密钥安全                                    |
+| 配置          | `.novacode/config.yaml` + `pyyaml`；密钥入 `.gitignore`       | 用户既定路径；N5 密钥安全                                    |
 | 错误处理      | 运行时错误经 `StreamEvent.err` 显示，不退出                  | 满足 F11                                                     |
 | 类型/质量     | `typing.Protocol` + `dataclass`；`ruff format` + `ruff check` + 可选 `mypy` | 简洁，无运行时依赖（vs pydantic）；ruff 一站式格式化/lint    |

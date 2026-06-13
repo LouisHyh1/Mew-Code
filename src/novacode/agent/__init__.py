@@ -4,9 +4,9 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from enum import Enum
 
-from mewcode.conversation import Conversation
-from mewcode.llm import Provider, ToolCall, ToolResult
-from mewcode.tool import DEFAULT_TIMEOUT, Registry
+from novacode.conversation import Conversation
+from novacode.llm import Provider, ToolCall, ToolResult
+from novacode.tool import DEFAULT_TIMEOUT, Registry
 
 MAX_TOOL_ROUNDS = 2
 

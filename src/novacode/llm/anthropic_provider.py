@@ -4,8 +4,8 @@ import asyncio
 import json
 from collections.abc import AsyncIterator
 
-from mewcode.config import ProviderConfig
-from mewcode.llm import (
+from novacode.config import ProviderConfig
+from novacode.llm import (
     ROLE_ASSISTANT,
     ROLE_TOOL,
     ROLE_USER,
@@ -14,7 +14,7 @@ from mewcode.llm import (
     ToolCall,
     ToolDefinition,
 )
-from mewcode.prompt import SYSTEM_PROMPT
+from novacode.prompt import SYSTEM_PROMPT
 
 
 class AnthropicProvider:

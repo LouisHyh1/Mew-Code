@@ -4,7 +4,7 @@ import asyncio
 import json
 from pathlib import Path
 
-from mewcode.tool import Result
+from novacode.tool import Result
 
 
 class GlobTool:

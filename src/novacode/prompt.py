@@ -2,10 +2,10 @@
 
 import os
 
-from mewcode import __version__
+from novacode import __version__
 
 SYSTEM_PROMPT = """\
-You are MewCode, an expert software engineer and terminal AI coding assistant.
+You are NovaCode, an expert software engineer and terminal AI coding assistant.
 
 You have access to tools:
 - read_file: Read a file's contents (returns numbered lines).
@@ -45,7 +45,7 @@ def render_banner(version: str | None = None, cwd: str | None = None) -> str:
     v = version or __version__
     d = cwd or os.getcwd()
     return f"""{CAT}
-  MewCode v{v}
+  NovaCode v{v}
   {d}
 
 Ready — type a message or /exit to quit.

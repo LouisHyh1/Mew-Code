@@ -1,4 +1,4 @@
-"""Textual TUI application — MewCodeApp with state machine and tool support."""
+"""Textual TUI application — NovaCodeApp with state machine and tool support."""
 
 import asyncio
 import time
@@ -13,15 +13,15 @@ from textual.binding import Binding
 from textual.message import Message as TMessage
 from textual.widgets import OptionList, RichLog, Static, TextArea
 
-from mewcode import __version__
-from mewcode.agent import Agent, Phase
-from mewcode.config import ProviderConfig
-from mewcode.conversation import Conversation
-from mewcode.llm import Provider as LLMProvider
-from mewcode.llm import new_provider
-from mewcode.prompt import render_banner
-from mewcode.tool import Registry
-from mewcode.tui.view import tool_line, tool_result_summary
+from novacode import __version__
+from novacode.agent import Agent, Phase
+from novacode.config import ProviderConfig
+from novacode.conversation import Conversation
+from novacode.llm import Provider as LLMProvider
+from novacode.llm import new_provider
+from novacode.prompt import render_banner
+from novacode.tool import Registry
+from novacode.tui.view import tool_line, tool_result_summary
 
 
 @dataclass
@@ -56,7 +56,7 @@ class InputArea(TextArea):
                 self.clear()
 
 
-class MewCodeApp(App):
+class NovaCodeApp(App):
     CSS = """
     Screen {
         background: #0d1117;
@@ -220,7 +220,7 @@ class MewCodeApp(App):
                             f"Running… ({elapsed:.0f}s)"
                         )
                     else:
-                        streaming.update(f"● MewCode  Imagining… ({elapsed:.0f}s)")
+                        streaming.update(f"● NovaCode  Imagining… ({elapsed:.0f}s)")
                 if ev.tool is not None and ev.tool.phase == Phase.START:
                     # 先提交 preamble 到 scrollback，然后开始工具行
                     if self.cur_reply.strip():

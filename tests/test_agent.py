@@ -4,9 +4,9 @@ from collections.abc import AsyncIterator
 
 import pytest
 
-from mewcode.agent import Agent, Phase
-from mewcode.conversation import Conversation
-from mewcode.llm import (
+from novacode.agent import Agent, Phase
+from novacode.conversation import Conversation
+from novacode.llm import (
     ROLE_ASSISTANT,
     ROLE_TOOL,
     ROLE_USER,
@@ -15,7 +15,7 @@ from mewcode.llm import (
     ToolCall,
     ToolDefinition,
 )
-from mewcode.tool import Registry, Result
+from novacode.tool import Registry, Result
 
 
 class FakeReadTool:

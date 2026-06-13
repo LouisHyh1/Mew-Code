@@ -4,7 +4,7 @@ import asyncio
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
-from mewcode.llm import ToolDefinition
+from novacode.llm import ToolDefinition
 
 DEFAULT_TIMEOUT: float = 30.0
 
@@ -43,12 +43,12 @@ def _truncate(s: str, max_lines: int, max_chars: int) -> str:
 
 def new_default_registry() -> "Registry":
     """构造并注册 6 个核心工具。"""
-    from mewcode.tool.bash import BashTool
-    from mewcode.tool.edit_file import EditFileTool
-    from mewcode.tool.glob_tool import GlobTool
-    from mewcode.tool.grep_tool import GrepTool
-    from mewcode.tool.read_file import ReadFileTool
-    from mewcode.tool.write_file import WriteFileTool
+    from novacode.tool.bash import BashTool
+    from novacode.tool.edit_file import EditFileTool
+    from novacode.tool.glob_tool import GlobTool
+    from novacode.tool.grep_tool import GrepTool
+    from novacode.tool.read_file import ReadFileTool
+    from novacode.tool.write_file import WriteFileTool
 
     registry = Registry()
     registry.register(ReadFileTool())

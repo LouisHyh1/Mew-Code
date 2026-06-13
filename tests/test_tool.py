@@ -5,13 +5,13 @@ from pathlib import Path
 
 import pytest
 
-from mewcode.tool import Registry, new_default_registry
-from mewcode.tool.bash import BashTool
-from mewcode.tool.edit_file import EditFileTool
-from mewcode.tool.glob_tool import GlobTool
-from mewcode.tool.grep_tool import GrepTool
-from mewcode.tool.read_file import ReadFileTool
-from mewcode.tool.write_file import WriteFileTool
+from novacode.tool import Registry, new_default_registry
+from novacode.tool.bash import BashTool
+from novacode.tool.edit_file import EditFileTool
+from novacode.tool.glob_tool import GlobTool
+from novacode.tool.grep_tool import GrepTool
+from novacode.tool.read_file import ReadFileTool
+from novacode.tool.write_file import WriteFileTool
 
 
 @pytest.mark.asyncio
@@ -131,8 +131,8 @@ async def test_bash_echo():
 @pytest.mark.asyncio
 async def test_bash_timeout():
     """bash 超时命令被 Registry 超时机制终止并返回结构化错误 (AC5)."""
-    from mewcode.tool import Registry
-    from mewcode.tool.bash import BashTool
+    from novacode.tool import Registry
+    from novacode.tool.bash import BashTool
 
     reg = Registry()
     reg.register(BashTool())

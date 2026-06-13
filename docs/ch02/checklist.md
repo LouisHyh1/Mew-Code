@@ -3,8 +3,8 @@
 > 每一项通过运行代码或观察行为来验证，聚焦系统行为；括号内为验证方式。
 
 ## 实现完整性
-- [ ] 配置加载：合法 `.mewcode/config.yaml` 能解析出 providers 列表（验证：单测 + 启动进入对话）。(AC1/F1)
-- [ ] 配置校验：缺密钥/非法 protocol/文件缺失时给出可读错误并非零退出，无未捕获堆栈（验证：删字段/改 protocol/删文件分别运行 `python -m mewcode`）。(AC1/N4)
+- [ ] 配置加载：合法 `.novacode/config.yaml` 能解析出 providers 列表（验证：单测 + 启动进入对话）。(AC1/F1)
+- [ ] 配置校验：缺密钥/非法 protocol/文件缺失时给出可读错误并非零退出，无未捕获堆栈（验证：删字段/改 protocol/删文件分别运行 `python -m novacode`）。(AC1/N4)
 - [ ] 单 provider 直进：仅一条配置时启动直接进入对话（验证：单条配置运行）。(AC2/F2)
 - [ ] 多 provider 选择：多条配置时出现方向键 `OptionList`，选定后进入对话（验证：两条配置运行、上下选择 + Enter）。(AC2/F2)
 - [ ] 内置 system prompt 与历史随请求发送（验证：问"你的角色/规则"，回答体现内置 prompt；多轮见 AC6）。(AC4/F4)
@@ -26,11 +26,11 @@
 - [ ] 窗口自适应：缩放终端宽度后输入框/对话区/markdown 不错版（验证：运行中调整终端宽度）。(N6)
 
 ## 编译与测试
-- [ ] `python -m mewcode` 能正常启动（在合法配置下进入 TUI）。
+- [ ] `python -m novacode` 能正常启动（在合法配置下进入 TUI）。
 - [ ] `ruff check .` 无告警。
 - [ ] `ruff format --check .` 通过（或本地 `ruff format .` 已统一格式）。
 - [ ] `pytest` 通过（`tests/test_config.py`、`tests/test_conversation.py`）。
-- [ ] （可选）`mypy src/mewcode` 通过（启用 strict 子集亦可）。
+- [ ] （可选）`mypy src/novacode` 通过（启用 strict 子集亦可）。
 - [ ] 密钥不回显/不打印：对话区与任何输出均不出现 `api_key`（验证：通读运行输出、检索无明文 key）。(N5)
 
 ## 端到端场景

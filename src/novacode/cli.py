@@ -1,9 +1,9 @@
-"""MewCode CLI entry — config loading and TUI startup."""
+"""NovaCode CLI entry — config loading and TUI startup."""
 
 import os
 import sys
 
-from mewcode import __version__
+from novacode import __version__
 
 
 def main() -> None:
@@ -13,15 +13,15 @@ def main() -> None:
 
     cwd = os.getcwd()
     config_paths = [
-        os.path.join(cwd, ".mewcode", "config.yaml"),
-        os.path.join(os.path.expanduser("~"), ".mewcode", "config.yaml"),
+        os.path.join(cwd, ".novacode", "config.yaml"),
+        os.path.join(os.path.expanduser("~"), ".novacode", "config.yaml"),
     ]
 
     cfg = None
     err = None
     for path in config_paths:
         try:
-            from mewcode.config import ConfigError, load
+            from novacode.config import ConfigError, load
 
             cfg = load(path)
             break
@@ -37,11 +37,11 @@ def main() -> None:
             print(f"No config file found. Searched:\n  - {searched}", file=sys.stderr)
         sys.exit(1)
 
-    from mewcode.tool import new_default_registry
-    from mewcode.tui.app import MewCodeApp
+    from novacode.tool import new_default_registry
+    from novacode.tui.app import NovaCodeApp
 
     registry = new_default_registry()
-    app = MewCodeApp(cfg.providers, registry, __version__)
+    app = NovaCodeApp(cfg.providers, registry, __version__)
     app.run()
 
 

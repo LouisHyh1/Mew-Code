@@ -1,7 +1,7 @@
 [project]
-name = "mewcode"
-version = "0.1.0"
-description = "MewCode — a terminal AI coding assistant"
+name = "novacode"
+version = "0.1.1"
+description = "NovaCode — a terminal AI coding assistant"
 requires-python = ">=3.12"
 dependencies = [
     "textual>=0.80",
@@ -12,14 +12,14 @@ dependencies = [
 ]
 
 [project.scripts]
-mew = "mewcode.cli:main"
+nova = "novacode.cli:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/mewcode"]
+packages = ["src/novacode"]
 
 [dependency-groups]
 dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.6"]

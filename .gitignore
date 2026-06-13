@@ -1,6 +1,6 @@
-.mewcode/config.yaml
+.novacode/config.yaml
 __pycache__/
 *.pyc
-mewcode.egg-info/
+novacode.egg-info/
 .pytest_cache/
 .idea/

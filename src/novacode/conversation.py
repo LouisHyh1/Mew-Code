@@ -1,6 +1,6 @@
 """Single-session conversation history."""
 
-from mewcode.llm import ROLE_ASSISTANT, ROLE_TOOL, ROLE_USER, Message, ToolCall, ToolResult
+from novacode.llm import ROLE_ASSISTANT, ROLE_TOOL, ROLE_USER, Message, ToolCall, ToolResult
 
 
 class Conversation:
