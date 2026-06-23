@@ -1,0 +1,165 @@
+/* NovaCode TUI styles — 与 mewcode-python 完全一致 */
+
+Screen {
+    background: #1a1a1a;
+}
+
+/* --- Title Bar --- */
+
+#title-bar {
+    dock: top;
+    width: 100%;
+    height: 3;
+    padding: 0 1;
+}
+
+/* --- Provider Selection --- */
+
+#provider-select {
+    align: center middle;
+    width: 100%;
+    height: 1fr;
+}
+
+#select-label {
+    text-align: center;
+    width: 100%;
+    height: auto;
+    margin-top: 2;
+    text-style: bold;
+}
+
+#provider-list {
+    width: 60;
+    height: auto;
+    max-height: 16;
+    margin: 1 2;
+}
+
+/* --- Chat Area --- */
+
+#chat-area {
+    height: 1fr;
+    min-height: 10;
+    padding: 0 1;
+}
+
+.message {
+    padding: 0 2;
+    margin: 0;
+    width: 100%;
+    height: auto;
+}
+
+.user-row {
+    height: auto;
+    width: 100%;
+    padding: 0 1;
+}
+
+.ai-row {
+    height: auto;
+    width: 100%;
+    padding: 0 1;
+}
+
+.user-message {
+    color: $text;
+    padding: 0 1;
+}
+
+.ai-message {
+    color: $text;
+    padding: 0 1;
+}
+
+.error-message {
+    color: $error;
+    padding: 0 2;
+}
+
+.system-message {
+    color: $text-muted;
+    padding: 0 2;
+}
+
+/* --- Tool Call Block --- */
+
+.tool-block {
+    padding: 0 2;
+    width: 100%;
+    height: auto;
+    color: $text;
+}
+
+.tool-block-running {
+    color: $text-muted;
+}
+
+.tool-block-done {
+    color: $success;
+}
+
+.tool-block-error {
+    color: $error;
+}
+
+.tool-detail {
+    padding: 0 4;
+    color: $text-muted;
+    height: auto;
+}
+
+/* --- Thinking Display --- */
+
+.thinking-done {
+    color: $text-muted;
+    text-style: italic;
+}
+
+/* --- Input Area --- */
+
+#spinner-live {
+    height: 1;
+    padding: 0 2;
+}
+
+#input-area {
+    dock: bottom;
+    height: auto;
+    max-height: 16;
+    padding: 0 1;
+    border-top: solid #303030;
+}
+
+#chat-input {
+    height: auto;
+    min-height: 3;
+    max-height: 10;
+    border: none;
+    background: #1a1a1a;
+    color: $text;
+}
+
+#status-bar {
+    height: auto;
+    min-height: 1;
+    width: 100%;
+    padding: 0 1;
+    border-top: solid #303030;
+}
+
+#mode-label {
+    width: auto;
+    height: 1;
+    color: $text-muted;
+    padding: 0 1;
+}
+
+#model-label {
+    width: 1fr;
+    height: 1;
+    text-align: right;
+    color: $text-muted;
+    padding: 0 1;
+}

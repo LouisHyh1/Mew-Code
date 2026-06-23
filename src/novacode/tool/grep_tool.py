@@ -9,13 +9,14 @@ from novacode.tool import Result
 
 
 class GrepTool:
+    read_only = True
+
     def name(self) -> str:
         return "grep"
 
     def description(self) -> str:
         return (
-            "在文件内容中按正则表达式搜索，"
-            "返回匹配位置（文件名:行号:内容）。最多返回 100 条命中。"
+            "在文件内容中按正则表达式搜索，返回匹配位置（文件名:行号:内容）。最多返回 100 条命中。"
         )
 
     def parameters(self) -> dict:
@@ -68,10 +69,7 @@ class GrepTool:
                             if len(hits) >= 100:
                                 break
                             if len(line) > 1024 * 1024:
-                                hits.append(
-                                    f"{filepath}:{lineno}:"
-                                    "[该行过长（>1MB），未完整搜索]"
-                                )
+                                hits.append(f"{filepath}:{lineno}:[该行过长（>1MB），未完整搜索]")
                                 continue
                             if rx.search(line):
                                 try:
@@ -80,8 +78,7 @@ class GrepTool:
                                     rel = filepath
                                 # 统一用正斜杠，避免反斜杠在渲染中被当转义符吃掉
                                 hits.append(
-                                    f"{str(rel).replace(chr(92), '/')}"
-                                    f":{lineno}:{line.rstrip()}"
+                                    f"{str(rel).replace(chr(92), '/')}:{lineno}:{line.rstrip()}"
                                 )
                 except (OSError, UnicodeDecodeError):
                     continue

@@ -12,6 +12,7 @@ DEFAULT_TIMEOUT: float = 30.0
 @dataclass
 class Result:
     """工具执行结果——永远以值类型返回，从不抛 Python 异常给上层。"""
+
     content: str
     is_error: bool = False
 
@@ -19,6 +20,9 @@ class Result:
 @runtime_checkable
 class Tool(Protocol):
     """统一工具抽象。"""
+
+    read_only: bool  # True=只读，可并发执行 & Plan Mode 放行
+
     def name(self) -> str: ...
     def description(self) -> str: ...
     def parameters(self) -> dict[str, Any]: ...
@@ -81,16 +85,36 @@ class Registry:
         result: list[ToolDefinition] = []
         for name in self._order:
             t = self._tools[name]
-            result.append(ToolDefinition(
-                name=t.name(),
-                description=t.description(),
-                input_schema=t.parameters(),
-            ))
+            result.append(
+                ToolDefinition(
+                    name=t.name(),
+                    description=t.description(),
+                    input_schema=t.parameters(),
+                )
+            )
         return result
 
-    async def execute(
-        self, name: str, args: str, timeout: float = DEFAULT_TIMEOUT
-    ) -> Result:
+    def read_only_definitions(self) -> list[ToolDefinition]:
+        """Plan Mode：只导出 read_only==True 的工具定义，保留注册顺序。"""
+        result: list[ToolDefinition] = []
+        for name in self._order:
+            t = self._tools[name]
+            if t.read_only is True:
+                result.append(
+                    ToolDefinition(
+                        name=t.name(),
+                        description=t.description(),
+                        input_schema=t.parameters(),
+                    )
+                )
+        return result
+
+    def is_read_only(self, name: str) -> bool:
+        """分批判定；未知工具返回 False（按串行处理）。"""
+        t = self.get(name)
+        return t is not None and t.read_only
+
+    async def execute(self, name: str, args: str, timeout: float = DEFAULT_TIMEOUT) -> Result:
         tool = self.get(name)
         if tool is None:
             return Result(content=f"未知工具: {name}", is_error=True)

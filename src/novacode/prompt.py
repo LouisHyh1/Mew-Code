@@ -23,8 +23,9 @@ IMPORTANT tool rules:
   and conclusions, not bare file lists or command output.
 - In your final answer, explain what you found. Name each key file and state
   its role so the user gains actionable understanding.
-- Do NOT request more tools after you already have results. Analyze what was
-  returned and give your answer. Only one round of tool execution per turn.
+- Keep using tools across multiple steps to make progress, and only give your
+  final concise answer once the task is complete. Do not stop after each tool
+  result — continue autonomously until the task is truly finished.
 - If a tool returns an error, explain it and suggest alternatives.
 
 Your style:
@@ -33,6 +34,17 @@ Your style:
 - If you're uncertain, state your confidence level explicitly.
 - No fluff, no apologies, no disclaimers unless asked.
 """
+
+# Plan Mode 系统提示后缀，拼接到 SYSTEM_PROMPT 之后。
+PLAN_MODE_REMINDER = (
+    "You are currently in PLAN MODE. You may use ONLY the read-only tools "
+    "(read_file, glob, grep) to investigate the codebase. You must NOT write files, "
+    "edit files, or run shell commands. Produce a clear, step-by-step plan for the task, "
+    "then stop and wait for the user to approve it with /do before doing any work."
+)
+
+# /do 注入的用户消息——指示模型按上文已确认的计划开始执行，可使用全部工具。
+EXECUTE_DIRECTIVE = "请按上面的计划开始执行。"
 
 CAT = r"""
   /\_/\

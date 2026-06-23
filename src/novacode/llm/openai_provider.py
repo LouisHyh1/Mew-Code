@@ -12,6 +12,7 @@ from novacode.llm import (
     StreamEvent,
     ToolCall,
     ToolDefinition,
+    Usage,
 )
 from novacode.prompt import SYSTEM_PROMPT
 
@@ -36,13 +37,14 @@ class OpenAIProvider:
         return self._model
 
     async def stream(
-        self, msgs: list[Message], tools: list[ToolDefinition]
+        self, msgs: list[Message], tools: list[ToolDefinition], system_suffix: str = ""
     ) -> "AsyncIterator[StreamEvent]":
-        messages = self._to_openai_messages(msgs)
+        messages = self._to_openai_messages(msgs, system_suffix)
         params: dict = {
             "model": self._model,
             "messages": messages,
             "stream": True,
+            "stream_options": {"include_usage": True},
         }
         if tools:
             params["tools"] = self._to_openai_tools(tools)
@@ -52,6 +54,16 @@ class OpenAIProvider:
             tool_calls_buf: dict[int, dict[str, str]] = {}
             finish_reason = None
             async for chunk in s:
+                # 末尾 usage chunk（choices 空，带 chunk.usage）
+                if not chunk.choices:
+                    if chunk.usage is not None:
+                        yield StreamEvent(
+                            usage=Usage(
+                                input_tokens=chunk.usage.prompt_tokens,
+                                output_tokens=chunk.usage.completion_tokens,
+                            )
+                        )
+                    continue
                 delta = chunk.choices[0].delta
                 finish_reason = chunk.choices[0].finish_reason or finish_reason
                 if delta.content:
@@ -72,11 +84,13 @@ class OpenAIProvider:
                 calls = []
                 for idx in sorted(tool_calls_buf):
                     v = tool_calls_buf[idx]
-                    calls.append(ToolCall(
-                        id=v["id"],
-                        name=v["name"],
-                        input=v.get("args") or "{}",
-                    ))
+                    calls.append(
+                        ToolCall(
+                            id=v["id"],
+                            name=v["name"],
+                            input=v.get("args") or "{}",
+                        )
+                    )
                 if calls:
                     yield StreamEvent(tool_calls=calls)
             yield StreamEvent(done=True)
@@ -98,10 +112,11 @@ class OpenAIProvider:
             for t in tools
         ]
 
-    def _to_openai_messages(self, msgs: list[Message]) -> list[dict]:
-        result: list[dict] = [
-            {"role": "system", "content": SYSTEM_PROMPT}
-        ]
+    def _to_openai_messages(self, msgs: list[Message], system_suffix: str = "") -> list[dict]:
+        system_text = SYSTEM_PROMPT
+        if system_suffix != "":
+            system_text = SYSTEM_PROMPT + "\n\n" + system_suffix
+        result: list[dict] = [{"role": "system", "content": system_text}]
         for m in msgs:
             if m.role == ROLE_USER:
                 result.append({"role": "user", "content": m.content})
@@ -109,26 +124,32 @@ class OpenAIProvider:
                 if m.tool_calls:
                     tc_list = []
                     for c in m.tool_calls:
-                        tc_list.append({
-                            "id": c.id,
-                            "type": "function",
-                            "function": {
-                                "name": c.name,
-                                "arguments": c.input or "{}",
-                            },
-                        })
-                    result.append({
-                        "role": "assistant",
-                        "content": m.content or None,
-                        "tool_calls": tc_list,
-                    })
+                        tc_list.append(
+                            {
+                                "id": c.id,
+                                "type": "function",
+                                "function": {
+                                    "name": c.name,
+                                    "arguments": c.input or "{}",
+                                },
+                            }
+                        )
+                    result.append(
+                        {
+                            "role": "assistant",
+                            "content": m.content or None,
+                            "tool_calls": tc_list,
+                        }
+                    )
                 else:
                     result.append({"role": "assistant", "content": m.content})
             elif m.role == ROLE_TOOL:
                 for r in m.tool_results:
-                    result.append({
-                        "role": "tool",
-                        "tool_call_id": r.tool_call_id,
-                        "content": r.content,
-                    })
+                    result.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": r.tool_call_id,
+                            "content": r.content,
+                        }
+                    )
         return result

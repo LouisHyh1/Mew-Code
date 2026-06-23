@@ -39,9 +39,10 @@ def main() -> None:
 
     from novacode.tool import new_default_registry
     from novacode.tui.app import NovaCodeApp
+    from novacode.tui.driver import NoAltScreenDriver
 
     registry = new_default_registry()
-    app = NovaCodeApp(cfg.providers, registry, __version__)
+    app = NovaCodeApp(cfg.providers, registry, __version__, driver_class=NoAltScreenDriver)
     app.run()
 
 

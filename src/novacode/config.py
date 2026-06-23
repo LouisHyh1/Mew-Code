@@ -49,14 +49,16 @@ def load(path: str) -> Config:
         if not isinstance(entry, dict):
             raise ConfigError(f"{prefix}: must be a mapping")
         _validate_provider(entry, prefix)
-        providers.append(ProviderConfig(
-            name=entry["name"],
-            protocol=entry["protocol"],
-            api_key=entry["api_key"],
-            model=entry["model"],
-            base_url=entry.get("base_url"),
-            thinking=entry.get("thinking", False),
-        ))
+        providers.append(
+            ProviderConfig(
+                name=entry["name"],
+                protocol=entry["protocol"],
+                api_key=entry["api_key"],
+                model=entry["model"],
+                base_url=entry.get("base_url"),
+                thinking=entry.get("thinking", False),
+            )
+        )
 
     return Config(providers=providers)
 

@@ -46,3 +46,30 @@ def test_tool_call_roundtrip() -> None:
     assert msgs[2].tool_results[0].content == "hello"
     assert msgs[3].role == ROLE_ASSISTANT
     assert "hello" in msgs[3].content
+
+
+def test_last_role_empty() -> None:
+    """空会话 last_role() 返回空字符串。"""
+    conv = Conversation()
+    assert conv.last_role() == ""
+
+
+def test_last_role_user() -> None:
+    """add_user 后 last_role() == 'user'。"""
+    conv = Conversation()
+    conv.add_user("hello")
+    assert conv.last_role() == ROLE_USER
+
+
+def test_last_role_assistant() -> None:
+    """add_assistant 后 last_role() == 'assistant'。"""
+    conv = Conversation()
+    conv.add_assistant("hi")
+    assert conv.last_role() == ROLE_ASSISTANT
+
+
+def test_last_role_tool() -> None:
+    """add_tool_results 后 last_role() == 'tool'。"""
+    conv = Conversation()
+    conv.add_tool_results([ToolResult(tool_call_id="t1", content="ok")])
+    assert conv.last_role() == ROLE_TOOL

@@ -8,6 +8,8 @@ from novacode.tool import Result
 
 
 class GlobTool:
+    read_only = True
+
     def name(self) -> str:
         return "glob"
 
@@ -67,13 +69,8 @@ class GlobTool:
         except OSError as e:
             return Result(content=f"glob 搜索失败: {e}", is_error=True)
         if not matches:
-            hint = (
-                "（提示：非递归模式 `*.py` 只查顶层，"
-                "递归请用 `**/*.py`）"
-            )
-            return Result(
-                content=f"在 {root} 下未匹配到 pattern='{pattern}' 的文件。{hint}"
-            )
+            hint = "（提示：非递归模式 `*.py` 只查顶层，递归请用 `**/*.py`）"
+            return Result(content=f"在 {root} 下未匹配到 pattern='{pattern}' 的文件。{hint}")
         matches.sort()
         if len(matches) > 100:
             matches = matches[:100]
