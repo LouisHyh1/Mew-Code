@@ -1,4 +1,4 @@
-"""Anthropic Messages API adapter with streaming and tool use."""
+"""Anthropic Messages API adapter with streaming, cache control, and tool use."""
 
 import asyncio
 import json
@@ -10,12 +10,12 @@ from novacode.llm import (
     ROLE_TOOL,
     ROLE_USER,
     Message,
+    Request,
     StreamEvent,
     ToolCall,
     ToolDefinition,
     Usage,
 )
-from novacode.prompt import SYSTEM_PROMPT
 
 
 class AnthropicProvider:
@@ -38,20 +38,40 @@ class AnthropicProvider:
     def model(self) -> str:
         return self._model
 
-    async def stream(
-        self, msgs: list[Message], tools: list[ToolDefinition], system_suffix: str = ""
-    ) -> "AsyncIterator[StreamEvent]":
+    async def stream(self, req: Request) -> "AsyncIterator[StreamEvent]":
+        # ── 构造 system 文本块（stable 带 cache_control 断点，env 不带）──
+        system: list[dict] = []
+        if req.system.stable:
+            system.append(
+                {
+                    "type": "text",
+                    "text": req.system.stable,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            )
+        if req.system.environment:
+            system.append(
+                {
+                    "type": "text",
+                    "text": req.system.environment,
+                }
+            )
 
-        messages = self._to_anthropic_messages(msgs)
+        # ── 转换消息并注入 reminder ─────────────────────────────
+        messages = self._to_anthropic_messages(req.messages)
+        if req.reminder:
+            self._inject_reminder_anthropic(messages, req.reminder)
+
+        # ── 构造请求参数 ───────────────────────────────────────
         params: dict = {
             "model": self._model,
             "max_tokens": 4096,
-            "system": self._effective_system(system_suffix),
+            "system": system,
             "messages": messages,
         }
-        if tools:
-            params["tools"] = self._to_anthropic_tools(tools)
-        if self._thinking and not self._has_tool_history(msgs):
+        if req.tools:
+            params["tools"] = self._to_anthropic_tools(req.tools)
+        if self._thinking and not self._has_tool_history(req.messages):
             params["thinking"] = {"type": "enabled", "budget_tokens": 2048}
 
         try:
@@ -62,12 +82,24 @@ class AnthropicProvider:
                             yield StreamEvent(text=event.delta.text)
 
                 final_message = await stream.get_final_message()
-                # 用量：流正常结束后、done 之前一次性上抛
+                # 用量：含缓存写/读字段
                 if final_message.usage is not None:
                     yield StreamEvent(
                         usage=Usage(
                             input_tokens=final_message.usage.input_tokens,
                             output_tokens=final_message.usage.output_tokens,
+                            cache_write=getattr(
+                                final_message.usage,
+                                "cache_creation_input_tokens",
+                                0,
+                            )
+                            or 0,
+                            cache_read=getattr(
+                                final_message.usage,
+                                "cache_read_input_tokens",
+                                0,
+                            )
+                            or 0,
                         )
                     )
                 if final_message.stop_reason == "tool_use":
@@ -89,11 +121,32 @@ class AnthropicProvider:
         except Exception as e:
             yield StreamEvent(err=e)
 
-    def _effective_system(self, suffix: str) -> str:
-        """系统提示拼接：suffix 非空时拼到 SYSTEM_PROMPT 之后。"""
-        if suffix == "":
-            return SYSTEM_PROMPT
-        return SYSTEM_PROMPT + "\n\n" + suffix
+    # ── reminder 注入 ──────────────────────────────────────────
+
+    @staticmethod
+    def _inject_reminder_anthropic(messages: list[dict], reminder: str) -> None:
+        """把 reminder 文本块注入到最后一条消息的 content 中。
+
+        Anthropic 要求严格角色交替：末条恒为 user（tool_result 映射为 user），
+        追加文本块到 content 列表不破坏角色交替（N3）。
+
+        极端情形（空消息 / 末条非 user）则新起一条 user 消息防御。
+        """
+        if not messages:
+            messages.append({"role": "user", "content": reminder})
+            return
+        last = messages[-1]
+        if last["role"] != "user":
+            messages.append({"role": "user", "content": reminder})
+            return
+        # 确保 content 为 list 形态
+        content = last["content"]
+        if isinstance(content, str):
+            content = [{"type": "text", "text": content}]
+        content.append({"type": "text", "text": reminder})
+        last["content"] = content
+
+    # ── 工具格式转换 ──────────────────────────────────────────
 
     def _to_anthropic_tools(self, tools: list[ToolDefinition]) -> list[dict]:
         return [
@@ -110,6 +163,8 @@ class AnthropicProvider:
             if m.tool_calls or m.tool_results:
                 return True
         return False
+
+    # ── 消息格式转换 ──────────────────────────────────────────
 
     def _to_anthropic_messages(self, msgs: list[Message]) -> list[dict]:
         result = []

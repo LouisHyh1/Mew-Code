@@ -16,6 +16,7 @@ class EditFileTool:
         return (
             "对文件中的唯一匹配文本做精确替换。"
             "old_string 必须在文件中恰好出现一次，否则返回可区分错误。"
+            "编辑前请先用 read_file 读取目标文件，确认 old_string 唯一。"
         )
 
     def parameters(self) -> dict:

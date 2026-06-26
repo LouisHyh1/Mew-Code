@@ -297,7 +297,7 @@ class NovaCodeApp(App):
 
         self._agent_task = asyncio.create_task(
             self._consume_events(
-                Agent(self.provider, self._tool_registry).run(
+                Agent(self.provider, self._tool_registry, self._version).run(
                     self.conv, self.mode, self.turn_cancel
                 )
             )

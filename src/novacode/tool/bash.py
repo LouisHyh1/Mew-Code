@@ -18,6 +18,7 @@ class BashTool:
             "在当前工作目录下执行 shell 命令，返回 stdout、stderr 和退出码。"
             "命令受超时约束（30s）。"
             "Windows 下使用 cmd /C，Linux/Mac 下使用 /bin/sh -c。"
+            "读文件、找文件、搜内容请优先用 read_file/glob/grep，不要用 bash 拼凑。"
         )
 
     def parameters(self) -> dict:

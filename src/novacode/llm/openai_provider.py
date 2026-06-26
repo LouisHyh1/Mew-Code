@@ -8,13 +8,12 @@ from novacode.llm import (
     ROLE_ASSISTANT,
     ROLE_TOOL,
     ROLE_USER,
-    Message,
+    Request,
     StreamEvent,
     ToolCall,
     ToolDefinition,
     Usage,
 )
-from novacode.prompt import SYSTEM_PROMPT
 
 
 class OpenAIProvider:
@@ -36,18 +35,16 @@ class OpenAIProvider:
     def model(self) -> str:
         return self._model
 
-    async def stream(
-        self, msgs: list[Message], tools: list[ToolDefinition], system_suffix: str = ""
-    ) -> "AsyncIterator[StreamEvent]":
-        messages = self._to_openai_messages(msgs, system_suffix)
+    async def stream(self, req: Request) -> "AsyncIterator[StreamEvent]":
+        messages = self._to_openai_messages(req)
         params: dict = {
             "model": self._model,
             "messages": messages,
             "stream": True,
             "stream_options": {"include_usage": True},
         }
-        if tools:
-            params["tools"] = self._to_openai_tools(tools)
+        if req.tools:
+            params["tools"] = self._to_openai_tools(req.tools)
 
         try:
             s = await self._client.chat.completions.create(**params)
@@ -57,10 +54,21 @@ class OpenAIProvider:
                 # 末尾 usage chunk（choices 空，带 chunk.usage）
                 if not chunk.choices:
                     if chunk.usage is not None:
+                        # 解析缓存命中（OpenAI 自动前缀缓存，仅读取）
+                        cache_read = (
+                            getattr(
+                                getattr(chunk.usage, "prompt_tokens_details", None),
+                                "cached_tokens",
+                                0,
+                            )
+                            or 0
+                        )
                         yield StreamEvent(
                             usage=Usage(
                                 input_tokens=chunk.usage.prompt_tokens,
                                 output_tokens=chunk.usage.completion_tokens,
+                                cache_write=0,
+                                cache_read=cache_read,
                             )
                         )
                     continue
@@ -112,12 +120,24 @@ class OpenAIProvider:
             for t in tools
         ]
 
-    def _to_openai_messages(self, msgs: list[Message], system_suffix: str = "") -> list[dict]:
-        system_text = SYSTEM_PROMPT
-        if system_suffix != "":
-            system_text = SYSTEM_PROMPT + "\n\n" + system_suffix
+    def _to_openai_messages(self, req: Request) -> list[dict]:
+        """构造 OpenAI 消息列表。
+
+        - 首条 system 消息 = stable + environment 拼接（stable 居前）
+        - 随即映射对话历史
+        - reminder 非空时追加尾部 user 消息
+        """
+        # 系统消息（stable 在前，兼容端点前缀缓存）
+        system_text = req.system.stable
+        if req.system.environment:
+            if system_text:
+                system_text = system_text + "\n\n" + req.system.environment
+            else:
+                system_text = req.system.environment
         result: list[dict] = [{"role": "system", "content": system_text}]
-        for m in msgs:
+
+        # 对话历史
+        for m in req.messages:
             if m.role == ROLE_USER:
                 result.append({"role": "user", "content": m.content})
             elif m.role == ROLE_ASSISTANT:
@@ -152,4 +172,9 @@ class OpenAIProvider:
                             "content": r.content,
                         }
                     )
+
+        # 补充消息注入（尾部 user 消息，OpenAI 容忍连续 user）
+        if req.reminder:
+            result.append({"role": "user", "content": req.reminder})
+
         return result

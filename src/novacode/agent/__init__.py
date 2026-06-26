@@ -7,11 +7,14 @@ from enum import Enum, IntEnum
 
 from novacode import prompt
 from novacode.conversation import Conversation
-from novacode.llm import Provider, ToolCall, ToolResult
+from novacode.llm import Provider, Request, System, ToolCall, ToolResult
 from novacode.tool import DEFAULT_TIMEOUT, Registry
 
 MAX_ITERATIONS: int = 25
 MAX_UNKNOWN_RUN: int = 3
+
+# 规划模式提醒：首轮完整，之后每 PLAN_REMINDER_INTERVAL 轮重复完整，其余轮精简。
+PLAN_REMINDER_INTERVAL: int = 4
 
 NOTICE_MAX_ITER = "（已达最大迭代轮数 25，自动停止；可继续发消息推进。）"
 NOTICE_UNKNOWN_TOOLS = "（连续多轮只请求到未注册的工具，自动停止。）"
@@ -42,10 +45,12 @@ class ToolEvent:
 
 @dataclass
 class Usage:
-    """一轮请求的 token 用量（透传 llm.Usage 语义）。"""
+    """一轮请求的 token 用量（透传 llm.Usage 语义，含缓存命中）。"""
 
     input: int = 0
     output: int = 0
+    cache_write: int = 0
+    cache_read: int = 0
 
 
 @dataclass
@@ -69,9 +74,10 @@ def _args_preview(args: str) -> str:
 class Agent:
     """持有 provider 与注册中心，执行 ReAct 循环。"""
 
-    def __init__(self, provider: Provider, registry: Registry) -> None:
+    def __init__(self, provider: Provider, registry: Registry, version: str = "") -> None:
         self._provider = provider
         self._registry = registry
+        self._version = version
 
     async def run(
         self,
@@ -79,13 +85,16 @@ class Agent:
         mode: Mode,
         cancel: asyncio.Event,
     ) -> AsyncIterator[Event]:
-        # 按 mode 取工具集与系统后缀
+        # ── 环境采集 + 系统提示装配（run 起始一次） ──────────
+        env = prompt.gather_environment(self._version, self._provider.model)
+        sys = prompt.build_system_prompt()
+        env_text = env.render()
+
+        # 按 mode 取工具集
         if mode == Mode.PLAN:
             defs = self._registry.read_only_definitions()
-            suffix = prompt.PLAN_MODE_REMINDER
         else:
             defs = self._registry.definitions()
-            suffix = ""
 
         unknown_run = 0
 
@@ -95,8 +104,14 @@ class Agent:
                 self._finish_cancelled(conv)
                 return
 
+            # ── 本轮 reminder（规划模式按轮次详略） ─────────────
+            reminder = ""
+            if mode == Mode.PLAN:
+                full = it == 1 or (it - 1) % PLAN_REMINDER_INTERVAL == 0
+                reminder = prompt.plan_reminder(full)
+
             stream_events, text, calls, usage, ok = await self._stream_once(
-                conv, defs, suffix, cancel
+                conv, defs, sys, env_text, reminder, cancel
             )
             for ev in stream_events:
                 yield ev
@@ -109,7 +124,14 @@ class Agent:
                 return
 
             if usage is not None:
-                yield Event(usage=Usage(input=usage.input_tokens, output=usage.output_tokens))
+                yield Event(
+                    usage=Usage(
+                        input=usage.input_tokens,
+                        output=usage.output_tokens,
+                        cache_write=usage.cache_write,
+                        cache_read=usage.cache_read,
+                    )
+                )
 
             # 无工具调用 → 自然完成
             if not calls:
@@ -149,7 +171,9 @@ class Agent:
         self,
         conv: Conversation,
         defs: list,
-        suffix: str,
+        sys: str,
+        env_text: str,
+        reminder: str,
         cancel: asyncio.Event,
     ):
         """单轮 LLM 请求。返回 (events, text, calls, usage, ok)。"""
@@ -160,7 +184,14 @@ class Agent:
         calls: list[ToolCall] = []
         usage: LLMUsage | None = None
 
-        async for ev in self._provider.stream(conv.messages(), defs, suffix):
+        req = Request(
+            messages=conv.messages(),
+            tools=defs,
+            system=System(stable=sys, environment=env_text),
+            reminder=reminder,
+        )
+
+        async for ev in self._provider.stream(req):
             if cancel.is_set():
                 return events, "", [], None, False
 

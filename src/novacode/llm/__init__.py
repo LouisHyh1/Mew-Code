@@ -40,10 +40,16 @@ class ToolDefinition:
 
 @dataclass
 class Usage:
-    """本轮输入/输出 token 数。"""
+    """本轮输入/输出 token 数，含缓存命中信息。
+
+    cache_write: Anthropic cache_creation_input_tokens；OpenAI 恒 0（自动缓存无写计数）。
+    cache_read:  Anthropic cache_read_input_tokens；OpenAI prompt_tokens_details.cached_tokens。
+    """
 
     input_tokens: int = 0
     output_tokens: int = 0
+    cache_write: int = 0
+    cache_read: int = 0
 
 
 @dataclass
@@ -68,17 +74,36 @@ class StreamEvent:
     err: Exception | None = None
 
 
+@dataclass
+class System:
+    """系统提示——分为可缓存稳定块与不进缓存的环境块。"""
+
+    stable: str = ""
+    environment: str = ""
+
+
+@dataclass
+class Request:
+    """一次 LLM 请求的全部入参。
+
+    messages:  持久对话历史（不含本轮 reminder）。
+    tools:     本轮工具集（普通=全量 / 规划=只读）。
+    system:    系统提示（stable 可缓存 + environment 不缓存）。
+    reminder:  本轮 system-reminder 内容（已含标签；空=不注入）。
+    """
+
+    messages: list[Message] = field(default_factory=list)
+    tools: list[ToolDefinition] = field(default_factory=list)
+    system: System = field(default_factory=System)
+    reminder: str = ""
+
+
 class Provider(Protocol):
     @property
     def name(self) -> str: ...
     @property
     def model(self) -> str: ...
-    def stream(
-        self,
-        msgs: list[Message],
-        tools: list[ToolDefinition],
-        system_suffix: str = "",
-    ) -> AsyncIterator[StreamEvent]: ...
+    def stream(self, req: Request) -> AsyncIterator[StreamEvent]: ...
 
 
 def new_provider(cfg: ProviderConfig) -> "Provider":
