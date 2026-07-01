@@ -496,10 +496,33 @@ class TestModeFallback:
         assert d == Decision.DENY
         assert "黑名单" in reason
 
-    def test_plan_write_ask(self, tmp_path):
+    def test_plan_write_deny(self, tmp_path):
+        """Plan 模式：写入操作硬拒绝，不弹确认。"""
         e = self._engine(tmp_path)
-        d, _ = e.check(Mode.PLAN, _write_call("test.txt"), False)
-        assert d == Decision.ASK
+        d, reason = e.check(Mode.PLAN, _write_call("test.txt"), False)
+        assert d == Decision.DENY
+        assert "计划模式拒绝" in reason
+
+    def test_plan_exec_deny(self, tmp_path):
+        """Plan 模式：命令执行硬拒绝（含安全命令）。"""
+        e = self._engine(tmp_path)
+        d, reason = e.check(Mode.PLAN, _bash_call("echo hi"), False)
+        assert d == Decision.DENY
+        assert "计划模式拒绝" in reason
+
+    def test_plan_write_deny_beats_allow_rule(self, tmp_path):
+        """Plan 模式硬拒绝优先于本地 allow 规则。"""
+        e = self._engine(tmp_path)
+        e.local.allow.append(Rule("Write", "*", True))
+        d, reason = e.check(Mode.PLAN, _write_call("test.txt"), False)
+        assert d == Decision.DENY
+        assert "计划模式拒绝" in reason
+
+    def test_plan_read_still_allowed(self, tmp_path):
+        """Plan 模式下只读操作仍然允许。"""
+        e = self._engine(tmp_path)
+        d, _ = e.check(Mode.PLAN, _read_call("test.txt"), True)
+        assert d == Decision.ALLOW
 
     def test_read_never_ask(self, tmp_path):
         """只读在所有模式下永不触发 Ask（N3）。"""

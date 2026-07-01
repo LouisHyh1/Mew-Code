@@ -27,6 +27,7 @@ class ToolResult:
     tool_call_id: str
     content: str
     is_error: bool = False
+    is_policy_denial: bool = False  # 是否为策略级硬拒绝（如 Plan 模式拒绝写入）
 
 
 @dataclass

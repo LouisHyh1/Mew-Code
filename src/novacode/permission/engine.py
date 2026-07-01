@@ -53,6 +53,15 @@ class Engine:
         if hit:
             return Decision.DENY, reason
 
+        # 0.5 Plan 模式硬门禁：WRITE/EXEC 一律拒绝，不可绕过安全白名单或 allow 规则
+        if mode == Mode.PLAN and cat in (Category.WRITE, Category.EXEC):
+            cat_name = {Category.WRITE: "文件写", Category.EXEC: "命令执行"}[cat]
+            return (
+                Decision.DENY,
+                f"[计划模式拒绝] {cat_name}类操作未执行。"
+                f"计划模式下只允许只读操作，文件系统未做任何修改。",
+            )
+
         # ① 黑名单（仅命令执行类）：安全命令白名单 → Allow；危险模式 → Deny
         if cat == Category.EXEC and target:
             # 1a: 安全命令白名单（明确无害的只读/查询命令直接放行）
@@ -157,10 +166,12 @@ def _load_or_empty(path: str):
 def _mode_fallback(mode: Mode, cat: Category) -> Decision:
     """F5 矩阵——规则未命中时的兜底裁决，只产 Allow/Ask。
 
+    Plan 模式 WRITE/EXEC 硬拒绝在 check() 上方门禁处理，不会到达此处。
+
     | 模式              | 只读  | 文件写 | 命令执行 |
     | default           | Allow | Ask    | Ask      |
     | acceptEdits       | Allow | Allow  | Ask      |
-    | plan              | Allow | Ask    | Ask      |
+    | plan              | Allow | Deny   | Deny     |
     | bypassPermissions | Allow | Allow  | Allow    |
     """
     if cat == Category.READ:

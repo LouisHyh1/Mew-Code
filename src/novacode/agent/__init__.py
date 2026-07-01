@@ -176,6 +176,13 @@ class Agent:
                     if not batch_task.done():
                         batch_task.cancel()
                     break
+            # Drain 余量事件：同步返回的 DENY 路径可能让事件留在队列里
+            while True:
+                try:
+                    ev = self._event_queue.get_nowait()
+                    yield ev
+                except asyncio.QueueEmpty:
+                    break
 
             self._event_queue = None
             try:
@@ -185,6 +192,19 @@ class Agent:
                 completed = False
 
             conv.add_tool_results(results)
+
+            # Plan 模式硬拒绝：输出确定性收尾，不让模型自由总结误报成功
+            if mode == Mode.PLAN and any(
+                getattr(r, "is_policy_denial", False) for r in results
+            ):
+                terminal_text = (
+                    "计划模式已拒绝执行写入/命令操作。"
+                    "未对文件系统做任何修改。"
+                    "如需执行，请使用 /do 或切换到 ACCEPT_EDITS/BYPASS 模式。"
+                )
+                conv.add_assistant(terminal_text)
+                yield Event(text=terminal_text, done=True)
+                return
 
             if not completed:
                 self._ensure_assistant_tail(conv, NOTICE_CANCELLED)
@@ -368,6 +388,19 @@ class Agent:
 
         ok=False 表示取消。
         """
+        # Plan 模式防御深度：非只读工具直接拒绝，不进入引擎或审批
+        if mode == Mode.PLAN and not self._registry.is_read_only(call.name):
+            return (
+                ToolResult(
+                    tool_call_id=call.id,
+                    content=f"[计划模式拒绝] {call.name} 未执行。"
+                    f"计划模式下只允许只读操作，文件系统未做任何修改。",
+                    is_error=True,
+                    is_policy_denial=True,
+                ),
+                True,
+            )
+
         if self.engine is None:
             return await self._execute_and_result(call, cancel), True
 
@@ -378,7 +411,12 @@ class Agent:
 
         if decision == Decision.DENY:
             return (
-                ToolResult(tool_call_id=call.id, content=reason, is_error=True),
+                ToolResult(
+                    tool_call_id=call.id,
+                    content=reason,
+                    is_error=True,
+                    is_policy_denial=(mode == Mode.PLAN),
+                ),
                 True,
             )
 
@@ -393,7 +431,13 @@ class Agent:
 
         if outcome == Outcome.DENY_ONCE:
             return (
-                ToolResult(tool_call_id=call.id, content=f"用户拒绝：{reason}", is_error=True),
+                ToolResult(
+                    tool_call_id=call.id,
+                    content=f"[已拒绝] {call.name} 未执行。"
+                    f"用户拒绝了此操作：{reason}。"
+                    f"该操作未对文件系统产生任何影响。",
+                    is_error=True,
+                ),
                 True,
             )
         elif outcome in (Outcome.ALLOW_ONCE, Outcome.ALLOW_FOREVER):

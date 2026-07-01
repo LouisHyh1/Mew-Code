@@ -24,7 +24,9 @@ from novacode.llm import (
     ToolCall,
     Usage,
 )
-from novacode.permission import Mode
+from novacode.permission import Mode, Outcome
+from novacode.permission.engine import Engine
+from novacode.permission.rule import RuleSet
 from novacode.tool import Registry, Result
 
 # ── Fake 工具 ──────────────────────────────────────────────
@@ -578,6 +580,181 @@ async def test_plan_mode_toolset():
     plan_tool_names = [t.name for t in provider.requests[0].tools]
     assert "read_file" in plan_tool_names
     assert "write_file" not in plan_tool_names
+
+
+@pytest.mark.asyncio
+async def test_plan_mode_hard_deny_write():
+    """Plan 模式：fake provider 强行返回 write_file → 不触发审批，直接拒绝。"""
+    registry = Registry()
+    registry.register(FakeReadTool())
+
+    class FakeWriteTool:
+        read_only = False
+
+        def name(self) -> str:
+            return "write_file"
+
+        def description(self) -> str:
+            return "Write."
+
+        def parameters(self) -> dict:
+            return {"type": "object", "properties": {}, "required": []}
+
+        async def execute(self, args: str) -> Result:
+            return Result(content="written")
+
+    registry.register(FakeWriteTool())
+
+    # 模拟 LLM 在 Plan 模式下强行返回 write_file
+    scripts = [[StreamEvent(
+        tool_calls=[ToolCall(id="t1", name="write_file", input='{"path":"x.txt"}')]
+    )]]
+    provider = FakeProvider(scripts)
+    conv = Conversation()
+    conv.add_user("plan")
+
+    engine = Engine(
+        root=".", blacklist=[],
+        user=RuleSet(), project=RuleSet(), local=RuleSet(),
+        local_path="", _start_mode=Mode.PLAN,
+    )
+    agent = Agent(provider, registry, engine=engine)
+    events = []
+    async for ev in agent.run(conv, Mode.PLAN, asyncio.Event()):
+        events.append(ev)
+
+    # 不应触发审批
+    assert not any(ev.approval is not None for ev in events)
+
+    # 工具执行结果应标记为策略拒绝
+    tool_events = [ev for ev in events if ev.tool is not None and ev.tool.phase == Phase.END]
+    assert len(tool_events) >= 1
+    write_event = tool_events[0]
+    assert write_event.tool.is_error
+
+    # 应输出确定性收尾文本
+    text_events = [ev.text for ev in events if ev.text]
+    assert any("计划模式已拒绝" in t for t in text_events)
+
+    # 应 done
+    assert any(ev.done for ev in events)
+
+
+@pytest.mark.asyncio
+async def test_plan_mode_hard_deny_stops_loop():
+    """Plan 拒绝后 agent 输出确定性收尾，不继续迭代。"""
+    registry = Registry()
+    registry.register(FakeReadTool())
+
+    class FakeBashTool:
+        read_only = False
+
+        def name(self) -> str:
+            return "bash"
+
+        def description(self) -> str:
+            return "Run commands."
+
+        def parameters(self) -> dict:
+            return {"type": "object", "properties": {}, "required": []}
+
+        async def execute(self, args: str) -> Result:
+            return Result(content="done")
+
+    registry.register(FakeBashTool())
+
+    scripts = [[StreamEvent(
+        tool_calls=[ToolCall(id="t1", name="bash", input='{"command":"echo hi"}')]
+    )]]
+    provider = FakeProvider(scripts)
+    conv = Conversation()
+    conv.add_user("plan")
+
+    engine = Engine(
+        root=".", blacklist=[],
+        user=RuleSet(), project=RuleSet(), local=RuleSet(),
+        local_path="", _start_mode=Mode.PLAN,
+    )
+    agent = Agent(provider, registry, engine=engine)
+    events = []
+    async for ev in agent.run(conv, Mode.PLAN, asyncio.Event()):
+        events.append(ev)
+
+    # 确定性收尾在 done 里
+    done_events = [ev for ev in events if ev.done]
+    assert len(done_events) == 1
+
+    # 终端消息包含"计划模式已拒绝"和"文件系统"
+    terminal_text = ""
+    for ev in events:
+        if ev.text:
+            terminal_text += ev.text
+    assert "计划模式已拒绝" in terminal_text
+    assert "文件系统" in terminal_text
+
+    # agent 不应该继续请求模型（只调用了 1 次 stream）
+    assert provider.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_deny_once_result_text():
+    """DENY_ONCE 结果文案明确标注"未执行"。"""
+    from novacode.agent import ApprovalRequest
+
+    registry = Registry()
+    registry.register(FakeReadTool())
+
+    class FakeBashTool:
+        read_only = False
+
+        def name(self) -> str:
+            return "bash"
+
+        def description(self) -> str:
+            return "Run commands."
+
+        def parameters(self) -> dict:
+            return {"type": "object", "properties": {}, "required": []}
+
+        async def execute(self, args: str) -> Result:
+            return Result(content="done")
+
+    registry.register(FakeBashTool())
+
+    scripts = [[StreamEvent(
+        tool_calls=[ToolCall(id="t1", name="bash", input='{"command":"git push"}')]
+    )]]
+    provider = FakeProvider(scripts)
+    conv = Conversation()
+    conv.add_user("run command")
+
+    engine = Engine(
+        root=".", blacklist=[],
+        user=RuleSet(), project=RuleSet(), local=RuleSet(),
+        local_path="", _start_mode=Mode.DEFAULT,
+    )
+    agent = Agent(provider, registry, engine=engine)
+
+    # 收集审批事件并在后台自动拒绝
+    async def _auto_deny():
+        async for ev in agent.run(conv, Mode.DEFAULT, asyncio.Event()):
+            if ev.approval is not None:
+                ev.approval.respond.set_result(Outcome.DENY_ONCE)
+
+    # 直接调用 run 并监听事件
+    events = []
+    async for ev in agent.run(conv, Mode.DEFAULT, asyncio.Event()):
+        if ev.approval is not None:
+            # 自动拒绝
+            ev.approval.respond.set_result(Outcome.DENY_ONCE)
+        events.append(ev)
+
+    # 工具结果应包含"未执行"和"未对文件系统"
+    tool_events = [ev for ev in events if ev.tool is not None and ev.tool.phase == Phase.END]
+    assert len(tool_events) >= 1
+    result_text = tool_events[0].tool.result
+    assert "未执行" in result_text
+    assert "未对文件系统" in result_text
 
 
 @pytest.mark.asyncio
