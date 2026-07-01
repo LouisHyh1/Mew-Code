@@ -4,6 +4,7 @@ import asyncio
 import json
 from pathlib import Path
 
+from novacode.permission.sensitive import is_sensitive_selector
 from novacode.tool import Result
 
 
@@ -68,6 +69,7 @@ class GlobTool:
                 count += 1
         except OSError as e:
             return Result(content=f"glob 搜索失败: {e}", is_error=True)
+        matches = [m for m in matches if not is_sensitive_selector(m)]
         if not matches:
             hint = "（提示：非递归模式 `*.py` 只查顶层，递归请用 `**/*.py`）"
             return Result(content=f"在 {root} 下未匹配到 pattern='{pattern}' 的文件。{hint}")

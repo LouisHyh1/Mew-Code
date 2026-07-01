@@ -1,9 +1,10 @@
-"""TUI rendering helpers for tool calls and status bar."""
+"""TUI rendering helpers for tool calls, status bar, and approval block."""
 
 from rich.padding import Padding
 from rich.text import Text
 
-from novacode.agent import Mode
+from novacode.agent import ApprovalRequest
+from novacode.permission import Mode
 
 
 def _compact_tok(n: int) -> str:
@@ -14,19 +15,21 @@ def _compact_tok(n: int) -> str:
 
 
 def status_bar(
-    name: str,
-    model: str,
     mode: Mode,
+    model: str,
     usage_in: int,
     usage_out: int,
 ) -> Text:
-    """渲染单行状态栏：provider │ [PLAN] │ model │ ↑in ↓out tok。"""
+    """渲染单行状态栏：左侧常驻权限模式（取代 provider 名）│ model │ ↑in ↓out tok。"""
     t = Text()
-    t.append(f" {name} ", style="bold")
-    if mode == Mode.PLAN:
-        t.append("│ ", style="dim")
-        t.append("PLAN", style="bold #ffa500")
-        t.append(" ", style="dim")
+    mode_styles = {
+        Mode.DEFAULT: "dim",
+        Mode.ACCEPT_EDITS: "bold #58a6ff",
+        Mode.PLAN: "bold #ffa500",
+        Mode.BYPASS: "bold #f85149",
+    }
+    style = mode_styles.get(mode, "dim")
+    t.append(f" {mode.label()} ", style=style)
     t.append(f"│ {model} ", style="dim")
     if usage_in > 0 or usage_out > 0:
         in_s = _compact_tok(usage_in)
@@ -52,3 +55,39 @@ def tool_result_summary(result: str, is_error: bool = False) -> Padding:
     text_content = "\n".join(f"  ⎿  {line}" for line in lines)
     style = "bold red" if is_error else "dim"
     return Padding(Text(text_content, style=style), (0, 0, 0, 2))
+
+
+def approval_block(req: ApprovalRequest, cursor: int) -> Text:
+    """渲染人在回路待批准块——多行菜单 + 光标高亮。
+
+    cursor: 0=允许本次, 1=永久允许, 2=拒绝本次
+    """
+    t = Text()
+    # 工具名 + 参数
+    t.append("● ", style="bold #875FFF")
+    t.append(f"{req.name}", style="bold #c9d1d9")
+    if req.args:
+        t.append(f"\n   参数: {req.args}", style="dim")
+    # 触发原因
+    t.append(f"\n   {req.reason}", style="dim")
+    t.append("\n")
+    t.append("\n   是否继续?", style="bold")
+    t.append("\n")
+
+    # 菜单项
+    items = [
+        ("1. 允许本次", "本次执行，不记忆"),
+        ("2. 永久允许（写入本地配置）", "本次执行 + 写入规则，下次自动放行"),
+        ("3. 拒绝本次", "将拒绝原因回灌给模型"),
+    ]
+
+    for idx, (label, _desc) in enumerate(items):
+        prefix = " > " if idx == cursor else "   "
+        label_style = "bold #875FFF" if idx == cursor else "dim"
+        desc_style = "dim" if idx == cursor else "dim"
+        t.append(f"{prefix}{label}", style=label_style)
+        t.append(f"  {_desc}\n", style=desc_style)
+
+    t.append("\n", style="")
+    t.append("↑↓ 选择 · 回车确认 · Esc 取消", style="dim italic")
+    return t

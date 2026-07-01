@@ -1,30 +1,30 @@
 """ReAct 循环编排——模型自主多轮：想 → 调工具 → 看结果 → 边做边调整，直到任务完成。"""
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from enum import Enum, IntEnum
+from enum import Enum
 
 from novacode import prompt
 from novacode.conversation import Conversation
 from novacode.llm import Provider, Request, System, ToolCall, ToolResult
+from novacode.permission import Decision, Mode, Outcome
+from novacode.permission.engine import Engine
+from novacode.permission.persist import persist_local_allow
 from novacode.tool import DEFAULT_TIMEOUT, Registry
+
+logger = logging.getLogger(__name__)
 
 MAX_ITERATIONS: int = 25
 MAX_UNKNOWN_RUN: int = 3
 
-# 规划模式提醒：首轮完整，之后每 PLAN_REMINDER_INTERVAL 轮重复完整，其余轮精简。
 PLAN_REMINDER_INTERVAL: int = 4
 
 NOTICE_MAX_ITER = "（已达最大迭代轮数 25，自动停止；可继续发消息推进。）"
 NOTICE_UNKNOWN_TOOLS = "（连续多轮只请求到未注册的工具，自动停止。）"
 NOTICE_STREAM_ERR = "（请求出错，本轮已中断。）"
 NOTICE_CANCELLED = "（已取消。）"
-
-
-class Mode(IntEnum):
-    NORMAL = 0
-    PLAN = 1
 
 
 class Phase(Enum):
@@ -44,6 +44,16 @@ class ToolEvent:
 
 
 @dataclass
+class ApprovalRequest:
+    """人在回路——待批准的工具调用（第五层）。"""
+
+    name: str
+    args: str
+    reason: str
+    respond: asyncio.Future[Outcome]
+
+
+@dataclass
 class Usage:
     """一轮请求的 token 用量（透传 llm.Usage 语义，含缓存命中）。"""
 
@@ -60,6 +70,7 @@ class Event:
     text: str = ""
     tool: ToolEvent | None = None
     usage: Usage | None = None
+    approval: ApprovalRequest | None = None
     iter: int = 0
     notice: str = ""
     done: bool = False
@@ -72,12 +83,20 @@ def _args_preview(args: str) -> str:
 
 
 class Agent:
-    """持有 provider 与注册中心，执行 ReAct 循环。"""
+    """持有 provider、注册中心与权限引擎，执行 ReAct 循环。"""
 
-    def __init__(self, provider: Provider, registry: Registry, version: str = "") -> None:
+    def __init__(
+        self,
+        provider: Provider,
+        registry: Registry,
+        version: str = "",
+        engine: Engine | None = None,
+    ) -> None:
         self._provider = provider
         self._registry = registry
         self._version = version
+        self.engine = engine
+        self._event_queue: asyncio.Queue[Event] | None = None
 
     async def run(
         self,
@@ -85,12 +104,10 @@ class Agent:
         mode: Mode,
         cancel: asyncio.Event,
     ) -> AsyncIterator[Event]:
-        # ── 环境采集 + 系统提示装配（run 起始一次） ──────────
         env = prompt.gather_environment(self._version, self._provider.model)
         sys = prompt.build_system_prompt()
         env_text = env.render()
 
-        # 按 mode 取工具集
         if mode == Mode.PLAN:
             defs = self._registry.read_only_definitions()
         else:
@@ -104,7 +121,6 @@ class Agent:
                 self._finish_cancelled(conv)
                 return
 
-            # ── 本轮 reminder（规划模式按轮次详略） ─────────────
             reminder = ""
             if mode == Mode.PLAN:
                 full = it == 1 or (it - 1) % PLAN_REMINDER_INTERVAL == 0
@@ -133,36 +149,53 @@ class Agent:
                     )
                 )
 
-            # 无工具调用 → 自然完成
             if not calls:
                 conv.add_assistant(self._ensure_final(text))
                 yield Event(done=True)
                 return
 
-            # 有工具调用
             conv.add_assistant_with_tool_calls(text, calls)
-
-            # 统计连续未知工具
             unknown_run = unknown_run + 1 if self._all_unknown(calls) else 0
 
-            batch_events, results, completed = await self._execute_batched(calls, cancel)
-            for ev in batch_events:
-                yield ev
+            # 通过队列并行运行 _execute_batched——支持人在回路事件穿插
+            self._event_queue = asyncio.Queue()
+            batch_task = asyncio.create_task(self._execute_batched(calls, cancel, mode))
+
+            # 从队列消费事件直到 batch_task 完成
+            results: list[ToolResult] = []
+            completed = True
+            while not batch_task.done():
+                try:
+                    ev = await self._event_queue.get()
+                    yield ev
+                except asyncio.CancelledError:
+                    if not batch_task.done():
+                        batch_task.cancel()
+                    raise
+                except Exception:
+                    if not batch_task.done():
+                        batch_task.cancel()
+                    break
+
+            self._event_queue = None
+            try:
+                results, completed = batch_task.result()
+            except asyncio.CancelledError:
+                results = []
+                completed = False
+
             conv.add_tool_results(results)
 
-            # 执行中被取消——最高优先级终止
             if not completed:
                 self._ensure_assistant_tail(conv, NOTICE_CANCELLED)
                 return
 
-            # 连续未知工具停止
             if unknown_run >= MAX_UNKNOWN_RUN:
                 yield Event(notice=NOTICE_UNKNOWN_TOOLS)
                 self._ensure_assistant_tail(conv, NOTICE_UNKNOWN_TOOLS)
                 yield Event(done=True)
                 return
 
-        # 迭代上限
         yield Event(notice=NOTICE_MAX_ITER)
         self._ensure_assistant_tail(conv, NOTICE_MAX_ITER)
         yield Event(done=True)
@@ -176,7 +209,6 @@ class Agent:
         reminder: str,
         cancel: asyncio.Event,
     ):
-        """单轮 LLM 请求。返回 (events, text, calls, usage, ok)。"""
         from novacode.llm import Usage as LLMUsage
 
         events: list[Event] = []
@@ -215,41 +247,75 @@ class Agent:
         return events, text, calls, usage, True
 
     async def _execute_batched(
-        self, calls: list[ToolCall], cancel: asyncio.Event
-    ) -> tuple[list[Event], list[ToolResult], bool]:
-        """保序分批并发执行工具。返回 (events, results, completed)。"""
-        events: list[Event] = []
+        self,
+        calls: list[ToolCall],
+        cancel: asyncio.Event,
+        mode: Mode,
+    ) -> tuple[list[ToolResult], bool]:
+        """保序分批并发执行工具（含权限检查）。通过 _emit 发事件。"""
         results: list[ToolResult | None] = [None] * len(calls)
         i = 0
         while i < len(calls):
             if cancel.is_set():
                 self._fill_cancelled(results, i)
-                return events, self._finalize_results(results, calls), False
+                return self._finalize_results(results, calls), False
 
             if self._registry.is_read_only(calls[i].name):
-                # 吃最长连续只读区间 [i, j)
                 j = i + 1
                 while j < len(calls) and self._registry.is_read_only(calls[j].name):
                     j += 1
-                # 先按序发所有 PHASE_START
+
+                done = [False] * (j - i)
                 for k in range(i, j):
-                    events.append(
-                        Event(
-                            tool=ToolEvent(
-                                name=calls[k].name,
-                                args=_args_preview(calls[k].input),
-                                phase=Phase.START,
+                    if self.engine is not None:
+                        decision, reason = self.engine.check(mode, calls[k], True)
+                        if decision == Decision.DENY:
+                            results[k] = ToolResult(
+                                tool_call_id=calls[k].id, content=reason, is_error=True
+                            )
+                            done[k - i] = True
+                            await self._emit(
+                                Event(
+                                    tool=ToolEvent(
+                                        name=calls[k].name,
+                                        args=_args_preview(calls[k].input),
+                                        phase=Phase.START,
+                                    )
+                                )
+                            )
+                        else:
+                            await self._emit(
+                                Event(
+                                    tool=ToolEvent(
+                                        name=calls[k].name,
+                                        args=_args_preview(calls[k].input),
+                                        phase=Phase.START,
+                                    )
+                                )
+                            )
+                    else:
+                        await self._emit(
+                            Event(
+                                tool=ToolEvent(
+                                    name=calls[k].name,
+                                    args=_args_preview(calls[k].input),
+                                    phase=Phase.START,
+                                )
                             )
                         )
-                    )
-                # 并发执行
-                tasks = [self._run_one(k, calls[k], results, cancel) for k in range(i, j)]
-                await asyncio.gather(*tasks)
-                # 按序发所有 PHASE_END
+
+                tasks = [
+                    self._run_one(k, calls[k], results, cancel)
+                    for k in range(i, j)
+                    if not done[k - i]
+                ]
+                if tasks:
+                    await asyncio.gather(*tasks)
+
                 for k in range(i, j):
                     if results[k] is not None:
                         r = results[k]
-                        events.append(
+                        await self._emit(
                             Event(
                                 tool=ToolEvent(
                                     name=calls[k].name,
@@ -262,8 +328,7 @@ class Agent:
                         )
                 i = j
             else:
-                # 有副作用：单个串行执行
-                events.append(
+                await self._emit(
                     Event(
                         tool=ToolEvent(
                             name=calls[i].name,
@@ -272,23 +337,129 @@ class Agent:
                         )
                     )
                 )
-                await self._run_one(i, calls[i], results, cancel)
+                r, ok = await self._run_side_effect(calls[i], cancel, mode)
+                if not ok:
+                    self._fill_cancelled(results, i)
+                    return self._finalize_results(results, calls), False
+                results[i] = r
                 if results[i] is not None:
-                    r = results[i]
-                    events.append(
+                    await self._emit(
                         Event(
                             tool=ToolEvent(
                                 name=calls[i].name,
                                 args=_args_preview(calls[i].input),
                                 phase=Phase.END,
-                                result=r.content,
-                                is_error=r.is_error,
+                                result=results[i].content,
+                                is_error=results[i].is_error,
                             )
                         )
                     )
                 i += 1
 
-        return events, self._finalize_results(results, calls), True
+        return self._finalize_results(results, calls), True
+
+    async def _run_side_effect(
+        self,
+        call: ToolCall,
+        cancel: asyncio.Event,
+        mode: Mode,
+    ) -> tuple[ToolResult, bool]:
+        """执行一个有副作用工具调用（含权限检查）。返回 (result, ok)。
+
+        ok=False 表示取消。
+        """
+        if self.engine is None:
+            return await self._execute_and_result(call, cancel), True
+
+        decision, reason = self.engine.check(mode, call, False)
+
+        if decision == Decision.ALLOW:
+            return await self._execute_and_result(call, cancel), True
+
+        if decision == Decision.DENY:
+            return (
+                ToolResult(tool_call_id=call.id, content=reason, is_error=True),
+                True,
+            )
+
+        # ASK → 人在回路
+        try:
+            outcome = await self._request_approval(call, reason)
+        except asyncio.CancelledError:
+            return (
+                ToolResult(tool_call_id=call.id, content=NOTICE_CANCELLED, is_error=True),
+                False,
+            )
+
+        if outcome == Outcome.DENY_ONCE:
+            return (
+                ToolResult(tool_call_id=call.id, content=f"用户拒绝：{reason}", is_error=True),
+                True,
+            )
+        elif outcome in (Outcome.ALLOW_ONCE, Outcome.ALLOW_FOREVER):
+            if outcome == Outcome.ALLOW_FOREVER:
+                try:
+                    persist_local_allow(self.engine, call)
+                except Exception as e:
+                    logger.warning("持久化规则失败: %s", e)
+            return await self._execute_and_result(call, cancel), True
+
+        return (
+            ToolResult(tool_call_id=call.id, content="未知权限裁决", is_error=True),
+            True,
+        )
+
+    async def _execute_and_result(self, call: ToolCall, cancel: asyncio.Event) -> ToolResult:
+        """执行工具并返回 ToolResult。"""
+        from novacode.tool import Result as ToolExecResult
+
+        if cancel.is_set():
+            return ToolResult(tool_call_id=call.id, content=NOTICE_CANCELLED, is_error=True)
+
+        try:
+            r: ToolExecResult = await asyncio.wait_for(
+                self._registry.execute(call.name, call.input), timeout=DEFAULT_TIMEOUT
+            )
+            return ToolResult(tool_call_id=call.id, content=r.content, is_error=r.is_error)
+        except TimeoutError:
+            return ToolResult(
+                tool_call_id=call.id,
+                content=f"工具 {call.name} 执行超时（{DEFAULT_TIMEOUT}s）",
+                is_error=True,
+            )
+        except asyncio.CancelledError:
+            return ToolResult(tool_call_id=call.id, content=NOTICE_CANCELLED, is_error=True)
+        except Exception as e:
+            return ToolResult(
+                tool_call_id=call.id,
+                content=f"工具 {call.name} 异常: {e}",
+                is_error=True,
+            )
+
+    async def _request_approval(self, call: ToolCall, reason: str) -> Outcome:
+        """发出人在回路请求事件，await Future 等待 TUI 回传用户选择。"""
+        respond: asyncio.Future[Outcome] = asyncio.get_running_loop().create_future()
+        await self._emit(
+            Event(
+                approval=ApprovalRequest(
+                    name=call.name,
+                    args=_args_preview(call.input),
+                    reason=reason,
+                    respond=respond,
+                )
+            )
+        )
+        try:
+            return await respond
+        except asyncio.CancelledError:
+            if not respond.done():
+                respond.set_result(Outcome.DENY_ONCE)
+            raise
+
+    async def _emit(self, event: Event) -> None:
+        """把事件发送到队列（由 run() 消费并 yield 给 TUI）。"""
+        if self._event_queue is not None:
+            await self._event_queue.put(event)
 
     async def _run_one(
         self,
@@ -314,7 +485,6 @@ class Agent:
                 timeout=DEFAULT_TIMEOUT,
                 return_when=asyncio.FIRST_COMPLETED,
             )
-            # 清理未完成的任务
             for t in pending:
                 t.cancel()
                 try:
@@ -348,7 +518,6 @@ class Agent:
             )
 
     def _fill_cancelled(self, results: list[ToolResult | None], start: int) -> None:
-        """给 start 及之后的所有 None 槽位填「已取消」结果。"""
         for k in range(start, len(results)):
             if results[k] is None:
                 results[k] = ToolResult(
@@ -360,7 +529,6 @@ class Agent:
     def _finalize_results(
         self, results: list[ToolResult | None], calls: list[ToolCall]
     ) -> list[ToolResult]:
-        """确保所有槽位都有 ToolResult（防御性兜底）。"""
         finalized: list[ToolResult] = []
         for k, r in enumerate(results):
             if r is not None:
@@ -375,29 +543,20 @@ class Agent:
                 )
         return finalized
 
-    # ── 辅助函数 ─────────────────────────────────────────────
-
     def _all_unknown(self, calls: list[ToolCall]) -> bool:
-        """所有 call 的 name 在注册中心都不存在才返回 True；混入已知工具视为有进展。"""
         for c in calls:
             if self._registry.get(c.name) is not None:
                 return False
         return True
 
     def _ensure_final(self, text: str) -> str:
-        """text 非空原样返回；为空则返回占位文本（避免空 assistant 回合）。"""
         if text.strip():
             return text
-        fallback = (
-            "（工具已执行完毕。如果你需要更多分析，请继续提问，我会基于已有结果给出详细回答。）"
-        )
-        return fallback
+        return "（工具已执行完毕。如果你需要更多分析，请继续提问，我会基于已有结果给出详细回答。）"
 
     def _ensure_assistant_tail(self, conv: Conversation, fallback: str) -> None:
-        """若 conv 末尾不是 assistant 角色，写入兜底文案保证角色交替合法。"""
         if conv.last_role() != "assistant":
             conv.add_assistant(fallback)
 
     def _finish_cancelled(self, conv: Conversation) -> None:
-        """取消路径统一收尾——保证 assistant 文本尾巴后 generator 自然结束。"""
         self._ensure_assistant_tail(conv, NOTICE_CANCELLED)

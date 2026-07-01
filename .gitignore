@@ -1,4 +1,7 @@
 .novacode/config.yaml
+.novacode/config.local.yaml
+.novacode/settings.local.yaml
+.env*
 __pycache__/
 *.pyc
 novacode.egg-info/

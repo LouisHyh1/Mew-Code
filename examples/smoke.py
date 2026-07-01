@@ -8,16 +8,18 @@
 
 import asyncio
 import sys
+from pathlib import Path
 
-from novacode.agent import Agent, Mode
+from novacode.agent import Agent
 from novacode.config import ConfigError, load
 from novacode.conversation import Conversation
 from novacode.llm import new_provider
+from novacode.permission import Mode, Outcome
+from novacode.permission.engine import new_engine
 from novacode.tool import new_default_registry
 
 
 async def main() -> None:
-    # 1. 加载配置
     import os
 
     config_paths = [
@@ -41,25 +43,33 @@ async def main() -> None:
     provider = new_provider(provider_cfg)
     registry = new_default_registry()
 
-    # 2. 两轮请求，观察缓存命中
+    # 构造权限引擎（BYPASS 模式跳过 Ask）
+    cwd = str(Path.cwd().resolve())
+    engine, _ = new_engine(cwd)
+
     prompt_text = sys.argv[1] if len(sys.argv) > 1 else "列出当前目录的文件"
 
     for round_idx in range(1, 3):
         conv = Conversation()
         conv.add_user(prompt_text)
 
-        agent = Agent(provider, registry, "dev")
+        agent = Agent(provider, registry, "dev", engine)
         total_in = 0
         total_out = 0
         total_cache_write = 0
         total_cache_read = 0
 
-        async for ev in agent.run(conv, Mode.NORMAL, asyncio.Event()):
+        async for ev in agent.run(conv, Mode.BYPASS, asyncio.Event()):
             if ev.usage is not None:
                 total_in += ev.usage.input
                 total_out += ev.usage.output
                 total_cache_write += ev.usage.cache_write
                 total_cache_read += ev.usage.cache_read
+            if ev.approval is not None:
+                # BYPASS 下不应出现 Ask，防御性处理
+                if not ev.approval.respond.done():
+                    ev.approval.respond.set_result(Outcome.DENY_ONCE)
+                continue
 
         print(
             f"  Round {round_idx}: "
@@ -67,7 +77,6 @@ async def main() -> None:
             f"cache_write={total_cache_write}, cache_read={total_cache_read}"
         )
 
-        # 打印模型回复
         msgs = conv.messages()
         for m in msgs:
             if m.role == "assistant" and m.content.strip():

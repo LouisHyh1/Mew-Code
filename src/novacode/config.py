@@ -1,5 +1,6 @@
-"""Configuration data types and YAML loader."""
+"""Configuration data types and YAML loader — supports ${VAR} env-var expansion."""
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
@@ -53,9 +54,9 @@ def load(path: str) -> Config:
             ProviderConfig(
                 name=entry["name"],
                 protocol=entry["protocol"],
-                api_key=entry["api_key"],
+                api_key=os.path.expandvars(entry["api_key"]),
                 model=entry["model"],
-                base_url=entry.get("base_url"),
+                base_url=os.path.expandvars(entry.get("base_url", "")) or None,
                 thinking=entry.get("thinking", False),
             )
         )

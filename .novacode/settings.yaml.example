@@ -1,0 +1,32 @@
+# NovaCode 权限配置示例
+# 三层配置文件（优先级：local > project > user）：
+#   ~/.novacode/settings.yaml           — 用户级
+#   <project>/.novacode/settings.yaml    — 项目级
+#   <project>/.novacode/settings.local.yaml — 本地级（gitignore，不进仓库）
+#
+# 工具友好名：Bash / Read / Write / Edit / Glob / Grep
+# 模式段：支持精确匹配（如 Bash(git status)）与 glob（如 Bash(git *)）。
+#   * 匹配任意字符序列；** 跨目录段（仅对文件路径有意义）。
+# 不带模式段（如 Bash）表示匹配该工具的全部调用。
+#
+# 只读类（Read/Glob/Grep）默认即 Allow，allow 规则主要用于提前放行 Bash/Write。
+# deny 规则可对只读做围栏（如 Read(.env)）。
+
+default_mode: default
+
+permissions:
+  allow:
+    - "Bash(git *)"
+    - "Bash(pytest)"
+  deny:
+    - "Bash(rm *)"
+    - "Read(.env*)"
+    - "Read(**/.env*)"
+    - "Write(.env*)"
+    - "Write(**/.env*)"
+    - "Edit(.env*)"
+    - "Edit(**/.env*)"
+    - "Glob(*.env*)"
+    - "Glob(**/*.env*)"
+    - "Grep(*.env*)"
+    - "Grep(**/*.env*)"

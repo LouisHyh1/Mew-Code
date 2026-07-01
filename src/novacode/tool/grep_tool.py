@@ -5,6 +5,7 @@ import json
 import re
 from pathlib import Path
 
+from novacode.permission.sensitive import is_sensitive_selector
 from novacode.tool import Result
 
 
@@ -62,6 +63,12 @@ class GrepTool:
                 iterator = root.rglob("*")
             for filepath in iterator:
                 if not filepath.is_file():
+                    continue
+                try:
+                    rel_for_filter = filepath.relative_to(root)
+                except ValueError:
+                    rel_for_filter = filepath
+                if is_sensitive_selector(str(rel_for_filter).replace("\\", "/")):
                     continue
                 try:
                     with open(filepath, encoding="utf-8", errors="replace") as f:

@@ -12,7 +12,6 @@ from novacode.agent import (
     NOTICE_MAX_ITER,
     NOTICE_UNKNOWN_TOOLS,
     Agent,
-    Mode,
     Phase,
 )
 from novacode.conversation import Conversation
@@ -25,6 +24,7 @@ from novacode.llm import (
     ToolCall,
     Usage,
 )
+from novacode.permission import Mode
 from novacode.tool import Registry, Result
 
 # ── Fake 工具 ──────────────────────────────────────────────
@@ -165,7 +165,7 @@ async def test_multi_turn_autonomous_loop():
 
     agent = Agent(provider, registry, "test-version")
     events = []
-    async for ev in agent.run(conv, Mode.NORMAL, asyncio.Event()):
+    async for ev in agent.run(conv, Mode.DEFAULT, asyncio.Event()):
         events.append(ev)
 
     # 事件类型覆盖
@@ -207,7 +207,7 @@ async def test_max_iterations_stop():
 
     agent = Agent(provider, registry)
     events = []
-    async for ev in agent.run(conv, Mode.NORMAL, asyncio.Event()):
+    async for ev in agent.run(conv, Mode.DEFAULT, asyncio.Event()):
         events.append(ev)
 
     assert provider.call_count == MAX_ITERATIONS
@@ -237,7 +237,7 @@ async def test_unknown_tools_stop():
 
     agent = Agent(provider, registry)
     events = []
-    async for ev in agent.run(conv, Mode.NORMAL, asyncio.Event()):
+    async for ev in agent.run(conv, Mode.DEFAULT, asyncio.Event()):
         events.append(ev)
 
     notices = [ev.notice for ev in events if ev.notice]
@@ -262,7 +262,7 @@ async def test_unknown_reset_by_known_tool():
 
     agent = Agent(provider, registry)
     events = []
-    async for ev in agent.run(conv, Mode.NORMAL, asyncio.Event()):
+    async for ev in agent.run(conv, Mode.DEFAULT, asyncio.Event()):
         events.append(ev)
 
     # 应自然完成（第4轮纯文本），未被未知工具截停
@@ -369,7 +369,7 @@ async def test_concurrent_batch():
 
     agent = Agent(provider, registry)
     events = []
-    async for ev in agent.run(conv, Mode.NORMAL, asyncio.Event()):
+    async for ev in agent.run(conv, Mode.DEFAULT, asyncio.Event()):
         events.append(ev)
 
     # 两只读的并发峰值 ≥2（确实并发）
@@ -448,7 +448,7 @@ async def test_cancel_history_consistency():
     agent = Agent(provider, registry)
 
     events = []
-    gen = agent.run(conv, Mode.NORMAL, cancel)
+    gen = agent.run(conv, Mode.DEFAULT, cancel)
 
     # 收集事件直到工具开始执行
     async for ev in gen:
@@ -476,7 +476,7 @@ async def test_cancel_history_consistency():
     scripts2 = [[StreamEvent(text="Continuing after cancel.")]]
     provider2 = FakeProvider(scripts2)
     agent2 = Agent(provider2, registry)
-    async for ev in agent2.run(conv, Mode.NORMAL, asyncio.Event()):
+    async for ev in agent2.run(conv, Mode.DEFAULT, asyncio.Event()):
         pass
     assert conv.last_role() == "assistant"
 
@@ -500,7 +500,7 @@ async def test_stream_error_recovery():
 
     agent = Agent(provider, registry)
     events = []
-    async for ev in agent.run(conv, Mode.NORMAL, asyncio.Event()):
+    async for ev in agent.run(conv, Mode.DEFAULT, asyncio.Event()):
         events.append(ev)
 
     errs = [ev.err for ev in events if ev.err is not None]
@@ -528,7 +528,7 @@ async def test_cancel_before_stream():
 
     agent = Agent(provider, registry)
     events = []
-    async for ev in agent.run(conv, Mode.NORMAL, cancel):
+    async for ev in agent.run(conv, Mode.DEFAULT, cancel):
         events.append(ev)
 
     assert len(events) == 1  # 仅 iter=1 事件（先 yield 再检查 cancel）
@@ -592,7 +592,7 @@ async def test_request_has_system_and_environment():
 
     agent = Agent(provider, registry)
     events = []
-    async for ev in agent.run(conv, Mode.NORMAL, asyncio.Event()):
+    async for ev in agent.run(conv, Mode.DEFAULT, asyncio.Event()):
         events.append(ev)
 
     assert len(provider.requests) >= 1
@@ -613,7 +613,7 @@ async def test_stable_system_same_for_normal_and_plan():
     conv_normal = Conversation()
     conv_normal.add_user("hi")
     agent_normal = Agent(provider_normal, registry)
-    async for ev in agent_normal.run(conv_normal, Mode.NORMAL, asyncio.Event()):
+    async for ev in agent_normal.run(conv_normal, Mode.DEFAULT, asyncio.Event()):
         pass
 
     # Plan mode
@@ -722,7 +722,7 @@ async def test_normal_mode_no_reminder():
     conv.add_user("hi")
 
     agent = Agent(provider, registry)
-    async for ev in agent.run(conv, Mode.NORMAL, asyncio.Event()):
+    async for ev in agent.run(conv, Mode.DEFAULT, asyncio.Event()):
         pass
 
     assert len(provider.requests) >= 1
@@ -747,7 +747,7 @@ async def test_cache_usage_passthrough():
 
     agent = Agent(provider, registry)
     events = []
-    async for ev in agent.run(conv, Mode.NORMAL, asyncio.Event()):
+    async for ev in agent.run(conv, Mode.DEFAULT, asyncio.Event()):
         events.append(ev)
 
     # 找到 usage 事件
@@ -771,7 +771,7 @@ async def test_environment_in_request():
     conv.add_user("where am I?")
 
     agent = Agent(provider, registry, "2.0-test")
-    async for ev in agent.run(conv, Mode.NORMAL, asyncio.Event()):
+    async for ev in agent.run(conv, Mode.DEFAULT, asyncio.Event()):
         pass
 
     assert len(provider.requests) >= 1

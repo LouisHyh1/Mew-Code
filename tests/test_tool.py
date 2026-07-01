@@ -1,6 +1,7 @@
 """Tests for tool system: registry and individual tools."""
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -136,7 +137,8 @@ async def test_bash_timeout():
 
     reg = Registry()
     reg.register(BashTool())
-    r = await reg.execute("bash", '{"command": "sleep 30"}', timeout=0.5)
+    args = json.dumps({"command": f'"{sys.executable}" -c "import time; time.sleep(30)"'})
+    r = await reg.execute("bash", args, timeout=0.5)
     assert r.is_error
     assert "超时" in r.content
 
